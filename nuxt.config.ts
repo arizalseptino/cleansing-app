@@ -1,9 +1,8 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true }
-
-    app: {
+  devtools: { enabled: true },
+  app: {
     head: {
       title: 'Aplikasi Cleansing Data',
       htmlAttrs: { lang: 'id' },
@@ -11,4 +10,3 @@ export default defineNuxtConfig({
   },
   css: ['~/assets/css/main.css'],
 })
-
