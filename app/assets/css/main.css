@@ -482,7 +482,6 @@ a {
   .connection-card h2 {
     margin-top: 11px;
   }
-
 }
 
 @media (max-width: 420px) {
@@ -512,5 +511,4 @@ a {
   .kartu {
     padding: 19px;
   }
-
 }
