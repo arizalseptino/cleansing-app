@@ -1,0 +1,38 @@
+:root {
+  --warna-utama: #2563eb;
+  --warna-teks: #1f2937;
+  --warna-redup: #6b7280;
+  --warna-latar: #f3f4f6;
+  --warna-kartu: #ffffff;
+  --warna-garis: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--warna-teks);
+  background: var(--warna-latar);
+  line-height: 1.6;
+}
+
+a {
+  color: var(--warna-utama);
+}
+
+.wadah {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.kartu {
+  background: var(--warna-kartu);
+  border: 1px solid var(--warna-garis);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
