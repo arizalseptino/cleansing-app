@@ -1,6 +1,6 @@
 <template>
   <div>
-    <p class="page-kicker">SIPKA</p>
+    <p class="page-kicker">Ruang kerja</p>
     <h1 class="page-title">Cleansing data, lebih sederhana</h1>
     <p class="page-description">Pilih tabel, tinjau data, lalu terapkan aturan cleansing.</p>
 
