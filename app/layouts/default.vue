@@ -1,52 +1,63 @@
 <template>
-  <div>
-    <header class="header">
-      <div class="wadah header-isi">
-        <strong>Cleansing Data</strong>
-        <nav>
-          <NuxtLink to="/">Beranda</NuxtLink>
-          <NuxtLink to="/tentang">Tentang</NuxtLink>
-        </nav>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <NuxtLink class="brand" to="/" aria-label="BersihData, ke ringkasan">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M5 6.5h14M5 12h14M5 17.5h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="m16.5 16.5 1.5 1.5 3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span class="brand-name">Bersih<span>Data</span></span>
+      </NuxtLink>
+
+      <p class="sidebar-label">Workspace</p>
+      <nav class="side-nav" aria-label="Navigasi utama">
+        <NuxtLink to="/">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
+            <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
+            <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
+            <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
+          </svg>
+          Ringkasan
+        </NuxtLink>
+        <NuxtLink to="/tentang">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
+            <path d="M12 11v5M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          Tentang aplikasi
+        </NuxtLink>
+      </nav>
+
+      <div class="sidebar-spacer" />
+      <div class="sidebar-note">
+        <p class="sidebar-note-title">Mulai dari yang sederhana</p>
+        <p>Pilih sumber data, tinjau isinya, lalu terapkan langkah cleansing.</p>
       </div>
-    </header>
+      <div class="profile">
+        <div class="profile-avatar" aria-hidden="true">AS</div>
+        <div>
+          <p class="profile-name">Arizal Septino</p>
+          <p class="profile-role">Data Engineer Intern</p>
+        </div>
+      </div>
+    </aside>
 
-    <main class="wadah">
-      <slot />
-    </main>
+    <div class="app-main">
+      <header class="topbar">
+        <div class="breadcrumb">Workspace <span>/</span> <strong>{{ $route.path === '/tentang' ? 'Tentang' : 'Ringkasan' }}</strong></div>
+        <div class="connection-pill" aria-label="ClickHouse lokal belum terhubung">
+          <span class="connection-dot" aria-hidden="true" />
+          ClickHouse lokal · Belum terhubung
+        </div>
+      </header>
 
-    <footer class="wadah footer">Aplikasi Cleansing Data · proyek belajar Nuxt.js</footer>
+      <main class="wadah">
+        <slot />
+        <footer class="footer">BersihData · proyek belajar dan riset cleansing data</footer>
+      </main>
+    </div>
   </div>
 </template>
-
-<style scoped>
-.header {
-  background: var(--warna-kartu);
-  border-bottom: 1px solid var(--warna-garis);
-}
-.header-isi {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 12px;
-  padding-bottom: 12px;
-}
-nav {
-  display: flex;
-  gap: 8px;
-}
-nav a {
-  text-decoration: none;
-  color: var(--warna-teks);
-  padding: 4px 12px;
-  border-radius: 6px;
-}
-nav a.router-link-exact-active {
-  background: var(--warna-latar);
-  color: var(--warna-utama);
-  font-weight: 600;
-}
-.footer {
-  color: var(--warna-redup);
-  font-size: 14px;
-}
-</style>
