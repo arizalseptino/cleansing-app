@@ -133,26 +133,6 @@ a {
   flex: 1;
 }
 
-.sidebar-note {
-  padding: 15px;
-  border: 1px solid #e8f0f7;
-  border-radius: 15px;
-  background: linear-gradient(145deg, #f5faff, #edf6ff);
-}
-
-.sidebar-note-title {
-  margin: 0 0 4px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.sidebar-note p {
-  margin: 0;
-  color: var(--warna-redup);
-  font-size: 11px;
-  line-height: 1.55;
-}
-
 .profile {
   display: flex;
   align-items: center;
@@ -389,49 +369,6 @@ a {
   text-align: center;
 }
 
-.about-card {
-  max-width: 760px;
-  margin-top: 28px;
-}
-
-.about-card h2 {
-  margin: 0 0 8px;
-  color: #263a4e;
-  font-size: 15px;
-}
-
-.about-card p {
-  margin: 0;
-  color: var(--warna-redup);
-  font-size: 12px;
-  line-height: 1.8;
-}
-
-.about-list {
-  display: grid;
-  gap: 12px;
-  margin: 20px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.about-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #53677c;
-  font-size: 12px;
-}
-
-.about-list li::before {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: #71aaff;
-  content: '';
-}
-
 @media (min-width: 1440px) {
   .wadah {
     padding-right: 58px;
@@ -483,7 +420,6 @@ a {
 
   .sidebar-label,
   .sidebar-spacer,
-  .sidebar-note,
   .profile {
     display: none;
   }

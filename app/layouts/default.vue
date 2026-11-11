@@ -22,20 +22,9 @@
           </svg>
           Ringkasan
         </NuxtLink>
-        <NuxtLink to="/tentang">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
-            <path d="M12 11v5M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-          Tentang aplikasi
-        </NuxtLink>
       </nav>
 
       <div class="sidebar-spacer" />
-      <div class="sidebar-note">
-        <p class="sidebar-note-title">Mulai dari yang sederhana</p>
-        <p>Pilih sumber data, tinjau isinya, lalu terapkan langkah cleansing.</p>
-      </div>
       <div class="profile">
         <div class="profile-avatar" aria-hidden="true">AS</div>
         <div>
@@ -47,7 +36,7 @@
 
     <div class="app-main">
       <header class="topbar">
-        <div class="breadcrumb">Workspace <span>/</span> <strong>{{ $route.path === '/tentang' ? 'Tentang' : 'Ringkasan' }}</strong></div>
+        <div class="breadcrumb">Workspace <span>/</span> <strong>Ringkasan</strong></div>
         <div class="connection-pill" aria-label="ClickHouse lokal belum terhubung">
           <span class="connection-dot" aria-hidden="true" />
           ClickHouse lokal · Belum terhubung
