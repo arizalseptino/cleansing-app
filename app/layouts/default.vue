@@ -26,11 +26,8 @@
 
       <div class="sidebar-spacer" />
       <div class="profile">
-        <div class="profile-avatar" aria-hidden="true">AS</div>
-        <div>
-          <p class="profile-name">Arizal Septino</p>
-          <p class="profile-role">Data Engineer Intern</p>
-        </div>
+        <div class="profile-avatar" aria-hidden="true">U</div>
+        <p class="profile-name">User</p>
       </div>
     </aside>
 
