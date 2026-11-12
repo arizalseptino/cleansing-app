@@ -14,7 +14,20 @@
             </svg>
           </div>
           <h2>Sumber data</h2>
-          <p>ClickHouse lokal belum terhubung.</p>
+          <p v-if="status === 'terhubung'">ClickHouse lokal terhubung (versi {{ version }}).</p>
+          <p v-else-if="status === 'memeriksa'">Memeriksa koneksi...</p>
+          <template v-else>
+            <p>ClickHouse lokal belum terhubung.</p>
+            <p v-if="message" class="connection-error">{{ message }}</p>
+          </template>
+          <button
+            class="connection-retry"
+            type="button"
+            :disabled="status === 'memeriksa'"
+            @click="refresh()"
+          >
+            Periksa ulang
+          </button>
         </div>
       </article>
 
@@ -36,3 +49,44 @@
     </section>
   </div>
 </template>
+
+<script setup lang="ts">
+const { status, version, message, refresh } = useClickHouseStatus()
+</script>
+
+<style scoped>
+.connection-error {
+  margin-top: 4px !important;
+  overflow-wrap: anywhere;
+}
+
+.connection-retry {
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 6px;
+  color: var(--warna-teks);
+  background: var(--warna-biru-muda);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.connection-retry:hover {
+  background: var(--warna-pistachio);
+}
+
+.connection-retry:active {
+  filter: brightness(0.94);
+}
+
+.connection-retry:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.connection-retry:focus-visible {
+  outline: 2px solid var(--warna-utama);
+  outline-offset: 2px;
+}
+</style>

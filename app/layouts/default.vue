@@ -34,9 +34,13 @@
     <div class="app-main">
       <header class="topbar">
         <div class="breadcrumb">Workspace <span>/</span> <strong>Ringkasan</strong></div>
-        <div class="connection-pill" aria-label="ClickHouse lokal belum terhubung">
-          <span class="connection-dot" aria-hidden="true" />
-          ClickHouse lokal · Belum terhubung
+        <div class="connection-pill">
+          <span class="connection-dot" :class="`connection-dot--${status}`" aria-hidden="true" />
+          <span aria-live="polite">
+            <template v-if="status === 'terhubung'">ClickHouse lokal · Terhubung (v{{ version }})</template>
+            <template v-else-if="status === 'memeriksa'">ClickHouse lokal · Memeriksa...</template>
+            <template v-else>ClickHouse lokal · Belum terhubung</template>
+          </span>
         </div>
       </header>
 
@@ -47,3 +51,17 @@
     </div>
   </div>
 </template>
+
+<script setup lang="ts">
+const { status, version } = useClickHouseStatus()
+</script>
+
+<style scoped>
+.connection-dot--terhubung {
+  background-color: #5e8f3e;
+}
+
+.connection-dot--gagal {
+  background-color: #a64b42;
+}
+</style>
