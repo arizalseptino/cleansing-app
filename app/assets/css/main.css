@@ -170,6 +170,9 @@ a {
 }
 
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   min-height: 60px;
   align-items: center;
@@ -177,7 +180,7 @@ a {
   gap: 20px;
   padding: 0 28px;
   border-bottom: 1px solid var(--warna-garis);
-  background: rgb(230 241 250 / 88%);
+  background: var(--warna-latar);
 }
 
 .breadcrumb {
