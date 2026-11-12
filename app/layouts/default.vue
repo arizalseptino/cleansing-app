@@ -2,16 +2,11 @@
   <div class="app-shell">
     <aside class="sidebar">
       <NuxtLink class="brand" to="/" aria-label="BersihData, ke ringkasan">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M5 6.5h14M5 12h14M5 17.5h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            <path d="m16.5 16.5 1.5 1.5 3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </span>
+        <img class="brand-mark" src="~/assets/logo-cleaningdata.png" alt="" width="38" height="38" />
         <span class="brand-name">Bersih<span>Data</span></span>
       </NuxtLink>
 
-      <p class="sidebar-label">Workspace</p>
+      <p class="sidebar-label">Ruang kerja</p>
       <nav class="side-nav" aria-label="Navigasi utama">
         <NuxtLink to="/">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -21,6 +16,13 @@
             <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
           </svg>
           Ringkasan
+        </NuxtLink>
+        <NuxtLink to="/sumber-data">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3.5" y="4.5" width="17" height="15" stroke="currentColor" stroke-width="1.7" />
+            <path d="M3.5 9.5h17M9 9.5v10M15 9.5v10M3.5 14.5h17" stroke="currentColor" stroke-width="1.7" />
+          </svg>
+          Sumber data
         </NuxtLink>
       </nav>
 
@@ -33,7 +35,7 @@
 
     <div class="app-main">
       <header class="topbar">
-        <div class="breadcrumb">Workspace <span>/</span> <strong>Ringkasan</strong></div>
+        <div class="breadcrumb">Ruang kerja <span>/</span> <strong>{{ breadcrumbTitle }}</strong></div>
         <div class="connection-pill">
           <span class="connection-dot" :class="`connection-dot--${status}`" aria-hidden="true" />
           <span aria-live="polite">
@@ -53,6 +55,8 @@
 </template>
 
 <script setup lang="ts">
+const route = useRoute()
+const breadcrumbTitle = computed(() => route.path === '/sumber-data' ? 'Sumber data' : 'Ringkasan')
 const { status, version } = useClickHouseStatus()
 </script>
 

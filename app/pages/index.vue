@@ -63,12 +63,12 @@ const { status, version, message, refresh } = useClickHouseStatus()
 .connection-retry {
   min-height: 44px;
   margin-top: 12px;
-  padding: 6px 10px;
+  padding: 8px 12px;
   border: 1px solid var(--warna-garis);
   border-radius: 6px;
   color: var(--warna-teks);
   background: var(--warna-biru-muda);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
