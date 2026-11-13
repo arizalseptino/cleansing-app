@@ -8,6 +8,7 @@ export type TableMetadata = {
 export type ColumnMetadata = {
   name: string
   type: string
+  default_kind?: string
 }
 
 const querySettings = {
@@ -16,7 +17,7 @@ const querySettings = {
 }
 
 function isSystemDatabase(database: string): boolean {
-  return ['system', 'information_schema'].includes(database.toLowerCase())
+  return ['system', 'information_schema', 'bersihdata'].includes(database.toLowerCase())
 }
 
 function databaseError(message: string, statusCode: 400 | 404 | 500): never {
@@ -42,7 +43,12 @@ export function requiredParameter(parameters: Record<string, unknown>, key: stri
 
 export async function validateDatabase(client: ReturnType<typeof useClickHouse>, database: string): Promise<void> {
   if (isSystemDatabase(database)) {
-    databaseError('Database sistem tidak dapat dipilih.', 400)
+    databaseError(
+      database.toLowerCase() === 'bersihdata'
+        ? 'Database khusus aplikasi tidak dapat dipilih sebagai sumber atau master.'
+        : 'Database sistem tidak dapat dipilih.',
+      400,
+    )
   }
 
   try {

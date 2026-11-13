@@ -218,6 +218,112 @@
         {{ previewPending ? 'Menjalankan pratinjau...' : 'Pratinjau' }}
       </button>
       <p v-if="previewError" class="preview-error" role="alert">{{ previewError }}</p>
+      <button
+        v-if="previewResult"
+        class="apply-open-button"
+        type="button"
+        :disabled="!canApply"
+        @click="openApplyConfirmation"
+      >
+        Terapkan ke tabel baru
+      </button>
+      <p v-if="previewResult && !previewMatchesCurrentParameters" class="field-message" role="status">
+        Parameter berubah sejak pratinjau. Jalankan pratinjau ulang sebelum menerapkan.
+      </p>
+    </section>
+
+    <section
+      v-if="showApplyConfirmation"
+      class="kartu apply-confirmation"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="apply-confirmation-title"
+    >
+      <h2 id="apply-confirmation-title" class="card-title">Konfirmasi tabel hasil</h2>
+      <div class="field-group">
+        <label for="result-table-name">Nama tabel hasil</label>
+        <input
+          id="result-table-name"
+          v-model="resultTableName"
+          type="text"
+          maxlength="64"
+          autocomplete="off"
+          :disabled="applying"
+        />
+        <p v-if="!resultNameValid" class="field-message field-error" role="alert">
+          Nama harus diawali huruf dan hanya berisi huruf, angka, atau garis bawah (maksimal 64 karakter).
+        </p>
+      </div>
+      <label class="save-original-option">
+        <input v-model="saveOriginal" type="checkbox" :disabled="applying" />
+        <span>Simpan nilai lama di kolom <code>{{ targetOriginalColumnName }}</code></span>
+      </label>
+
+      <dl class="apply-summary">
+        <div>
+          <dt>Tabel sumber</dt>
+          <dd><code>{{ sourceDatabase }}.{{ sourceTable }}</code> tidak akan diubah.</dd>
+        </div>
+        <div>
+          <dt>Tabel hasil yang dibuat</dt>
+          <dd><code>{{ sourceDatabase }}.{{ resultTableName || '(nama belum diisi)' }}</code></dd>
+        </div>
+        <div>
+          <dt>Perkiraan baris yang akan terisi</dt>
+          <dd>{{ formatNumber(previewResult?.statistics.fillableRows ?? 0) }}</dd>
+        </div>
+      </dl>
+
+      <p v-if="!canApply" class="field-message field-error" role="alert">
+        Parameter tidak sama dengan pratinjau. Tutup konfirmasi dan jalankan pratinjau ulang.
+      </p>
+      <p v-if="applyError" class="preview-error" role="alert">{{ applyError }}</p>
+      <p v-if="applying" class="field-message" role="status">
+        Sedang membuat dan mengisi tabel hasil. Mohon tunggu...
+      </p>
+      <div class="apply-actions">
+        <button
+          class="preview-button"
+          type="button"
+          :disabled="!canApply || !resultNameValid || applying"
+          @click="applyToNewTable"
+        >
+          {{ applying ? 'Sedang menerapkan...' : 'Ya, buat tabel hasil' }}
+        </button>
+        <button class="cancel-button" type="button" :disabled="applying" @click="showApplyConfirmation = false">
+          Batal
+        </button>
+      </div>
+    </section>
+
+    <section v-if="applyResult" class="kartu apply-result" aria-live="polite">
+      <h2 class="card-title">Penerapan berhasil</h2>
+      <p class="field-message">Tabel sumber tetap tidak diubah. Tabel hasil baru sudah selesai diverifikasi.</p>
+      <dl class="apply-summary">
+        <div>
+          <dt>Tabel hasil</dt>
+          <dd><code>{{ applyResult.database }}.{{ applyResult.tableName }}</code></dd>
+        </div>
+        <div>
+          <dt>Jumlah baris</dt>
+          <dd>{{ formatNumber(applyResult.rowCount) }}</dd>
+        </div>
+        <div>
+          <dt>Baris terisi</dt>
+          <dd>{{ formatNumber(applyResult.filledRows) }}</dd>
+        </div>
+        <div>
+          <dt>Baris ambigu dibiarkan kosong</dt>
+          <dd>{{ formatNumber(applyResult.ambiguousRowsLeftEmpty) }}</dd>
+        </div>
+        <div>
+          <dt>Durasi</dt>
+          <dd>{{ formatDuration(applyResult.durationMs) }}</dd>
+        </div>
+      </dl>
+      <button class="preview-button" type="button" @click="viewResultTable">
+        Lihat isi tabel hasil
+      </button>
     </section>
 
     <section v-if="previewResult" class="kartu result-card" aria-live="polite">
@@ -324,6 +430,14 @@ type PreviewResult = {
   }
   orderedBySortingKey: boolean
 }
+type ApplyResult = {
+  database: string
+  tableName: string
+  rowCount: number
+  filledRows: number
+  ambiguousRowsLeftEmpty: number
+  durationMs: number
+}
 type CategoryKey = 'fillable' | 'ambiguous' | 'remainingEmpty'
 type CategoryDefinition = { key: CategoryKey; label: string; countKey: 'fillableRows' | 'ambiguousRows' | 'remainingEmptyRows' }
 type CatalogResponse<T> = { data: T[] }
@@ -359,7 +473,14 @@ const masterFillColumn = ref('')
 const previewPending = ref(false)
 const previewError = ref('')
 const previewResult = ref<PreviewResult | null>(null)
+const previewSignature = ref('')
 const activeCategory = ref<CategoryKey>('fillable')
+const showApplyConfirmation = ref(false)
+const resultTableName = ref('')
+const saveOriginal = ref(true)
+const applying = ref(false)
+const applyError = ref('')
+const applyResult = ref<ApplyResult | null>(null)
 const categories: CategoryDefinition[] = [
   { key: 'fillable', label: 'Bisa diisi', countKey: 'fillableRows' },
   { key: 'ambiguous', label: 'Ambigu', countKey: 'ambiguousRows' },
@@ -372,6 +493,21 @@ const masterTextColumns = computed(() => masterColumns.value.filter(({ type }) =
 const selectedFeature = computed(() => features.value.find(({ id }) => id === selectedFeatureId.value))
 const activeExamples = computed(() => previewResult.value?.examples[activeCategory.value] ?? [])
 const activeCategoryLabel = computed(() => categories.find(({ key }) => key === activeCategory.value)?.label ?? '')
+const currentPreviewSignature = computed(() => JSON.stringify({
+  featureId: selectedFeatureId.value,
+  parameters: getPreviewParameters(),
+}))
+const previewMatchesCurrentParameters = computed(() => Boolean(
+  previewSignature.value && previewSignature.value === currentPreviewSignature.value,
+))
+const canApply = computed(() => Boolean(
+  previewResult.value
+  && previewMatchesCurrentParameters.value
+  && !applying.value
+  && !applyResult.value,
+))
+const resultNameValid = computed(() => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(resultTableName.value))
+const targetOriginalColumnName = computed(() => `${targetColumn.value}_asli`)
 const canPreview = computed(() => Boolean(
   selectedFeature.value
   && sourceDatabase.value
@@ -392,6 +528,19 @@ function getErrorMessage(error: unknown, fallback: string): string {
     if ('message' in error && typeof error.message === 'string') return error.message
   }
   return fallback
+}
+
+function getPreviewParameters(): Record<string, string | undefined> {
+  return {
+    sourceDatabase: sourceDatabase.value ?? undefined,
+    sourceTable: sourceTable.value ?? undefined,
+    sourceColumn: sourceColumn.value || undefined,
+    targetColumn: targetColumn.value || undefined,
+    masterDatabase: masterDatabase.value || undefined,
+    masterTable: masterTable.value || undefined,
+    masterColumn: masterColumn.value || undefined,
+    masterFillColumn: masterFillColumn.value || undefined,
+  }
 }
 
 async function loadFeatures() {
@@ -535,27 +684,22 @@ function handleMasterTableChange() {
 
 async function runPreview() {
   if (!selectedFeature.value || !canPreview.value || previewPending.value) return
+  const featureId = selectedFeature.value.id
+  const parameters = getPreviewParameters()
+  const requestSignature = JSON.stringify({ featureId, parameters })
   previewPending.value = true
   previewError.value = ''
   previewResult.value = null
+  previewSignature.value = ''
+  applyResult.value = null
+  showApplyConfirmation.value = false
   activeCategory.value = 'fillable'
   try {
     previewResult.value = await $fetch<PreviewResult>('/api/cleansing/preview', {
       method: 'POST',
-      body: {
-        featureId: selectedFeature.value.id,
-        parameters: {
-          sourceDatabase: sourceDatabase.value,
-          sourceTable: sourceTable.value,
-          sourceColumn: sourceColumn.value,
-          targetColumn: targetColumn.value,
-          masterDatabase: masterDatabase.value,
-          masterTable: masterTable.value,
-          masterColumn: masterColumn.value,
-          masterFillColumn: masterFillColumn.value || undefined,
-        },
-      },
+      body: { featureId, parameters },
     })
+    previewSignature.value = requestSignature
   } catch (error) {
     previewError.value = getErrorMessage(error, 'Pratinjau tidak dapat dijalankan.')
   } finally {
@@ -563,8 +707,54 @@ async function runPreview() {
   }
 }
 
+function openApplyConfirmation() {
+  if (!canApply.value || !sourceTable.value) return
+  resultTableName.value = `${sourceTable.value}_cleaned`
+  saveOriginal.value = true
+  applyError.value = ''
+  showApplyConfirmation.value = true
+}
+
+async function applyToNewTable() {
+  if (!selectedFeature.value || !canApply.value || !resultNameValid.value) return
+  const featureId = selectedFeature.value.id
+  const parameters = getPreviewParameters()
+  if (JSON.stringify({ featureId, parameters }) !== previewSignature.value) return
+
+  applying.value = true
+  applyError.value = ''
+  try {
+    applyResult.value = await $fetch<ApplyResult>('/api/cleansing/apply', {
+      method: 'POST',
+      body: {
+        featureId,
+        parameters,
+        resultTableName: resultTableName.value,
+        saveOriginal: saveOriginal.value,
+      },
+    })
+    showApplyConfirmation.value = false
+  } catch (error) {
+    applyError.value = getErrorMessage(error, 'Penerapan gagal. Tabel sumber tidak diubah.')
+  } finally {
+    applying.value = false
+  }
+}
+
+async function viewResultTable() {
+  if (!applyResult.value) return
+  source.setDatabase(applyResult.value.database)
+  source.setTable(applyResult.value.tableName)
+  await navigateTo('/sumber-data')
+}
+
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('id-ID').format(value)
+}
+
+function formatDuration(value: number): string {
+  if (value < 1000) return `${formatNumber(value)} ms`
+  return `${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(value / 1000)} detik`
 }
 
 function displayValue(value: unknown): string {
@@ -584,7 +774,10 @@ watch([sourceDatabase, sourceTable], ([database, table]) => {
 
 watch(selectedFeatureId, () => {
   previewResult.value = null
+  previewSignature.value = ''
   previewError.value = ''
+  applyResult.value = null
+  showApplyConfirmation.value = false
 })
 
 onMounted(async () => {
@@ -598,7 +791,9 @@ onMounted(async () => {
 
 <style scoped>
 .cleansing-card,
-.result-card {
+.result-card,
+.apply-confirmation,
+.apply-result {
   max-width: 920px;
   margin-top: 20px;
 }
@@ -634,9 +829,24 @@ onMounted(async () => {
   font-size: 14px;
 }
 
+.field-group input[type='text'] {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+}
+
 .field-group select:focus-visible,
+.field-group input[type='text']:focus-visible,
 .preview-button:focus-visible,
-.inline-retry:focus-visible {
+.inline-retry:focus-visible,
+.apply-open-button:focus-visible,
+.cancel-button:focus-visible {
   outline: 2px solid var(--warna-utama);
   outline-offset: 2px;
 }
@@ -705,6 +915,92 @@ onMounted(async () => {
 .preview-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.apply-open-button,
+.cancel-button {
+  min-height: 44px;
+  margin: 14px 0 0 8px;
+  padding: 9px 16px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: #355875;
+  background: var(--warna-biru-muda);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.apply-open-button:disabled,
+.cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.apply-confirmation {
+  border-top: 3px solid var(--warna-pistachio);
+}
+
+.save-original-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 14px;
+  color: #526479;
+  font-size: 13px;
+}
+
+.save-original-option input {
+  width: 17px;
+  height: 17px;
+  margin: 2px 0 0;
+  accent-color: var(--warna-utama);
+}
+
+.save-original-option code,
+.apply-summary code {
+  overflow-wrap: anywhere;
+}
+
+.apply-summary {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+
+.apply-summary div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #e8f0f7;
+}
+
+.apply-summary dt {
+  color: var(--warna-redup);
+  font-size: 13px;
+}
+
+.apply-summary dd {
+  margin: 0;
+  color: #263a4e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.apply-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.apply-actions .cancel-button {
+  margin-top: 14px;
+}
+
+.apply-result {
+  border-top: 3px solid var(--warna-pistachio);
 }
 
 .preview-error {
@@ -838,6 +1134,11 @@ onMounted(async () => {
 }
 
 @media (max-width: 420px) {
+  .apply-summary div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
   .statistics-grid {
     grid-template-columns: 1fr;
   }

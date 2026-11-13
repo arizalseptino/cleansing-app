@@ -4,7 +4,7 @@ import type { CleansingFeature } from './types'
 const features: CleansingFeature[] = [fillEmptyFromMasterText]
 
 export function listCleansingFeatures() {
-  return features.map(({ preview: _preview, ...definition }) => definition)
+  return features.map(({ preview: _preview, apply: _apply, ...definition }) => definition)
 }
 
 export function findCleansingFeature(id: string) {

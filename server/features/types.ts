@@ -27,10 +27,25 @@ export type FeaturePreview = {
   orderedBySortingKey: boolean
 }
 
+export type FeatureApplySummary = {
+  database: string
+  tableName: string
+  rowCount: number
+  filledRows: number
+  ambiguousRowsLeftEmpty: number
+  durationMs: number
+}
+
 export type CleansingFeature = {
   id: string
   name: string
   description: string
   parameters: FeatureParameter[]
   preview: (client: ReturnType<typeof useClickHouse>, parameters: Record<string, unknown>) => Promise<FeaturePreview>
+  apply?: (
+    client: ReturnType<typeof useClickHouse>,
+    parameters: Record<string, unknown>,
+    resultTableName: string,
+    saveOriginal: boolean,
+  ) => Promise<FeatureApplySummary>
 }
