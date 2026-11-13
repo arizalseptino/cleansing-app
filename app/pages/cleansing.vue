@@ -212,7 +212,7 @@
       </div>
 
       <p class="safety-note">
-        Pratinjau ini hanya membaca data dan tidak mengubah tabel maupun isinya. Penerapan hasil akan tersedia pada tahap berikutnya.
+        Pratinjau hanya membaca data dan tidak mengubah tabel. Jika diterapkan, hasil akan dibuat sebagai tabel baru.
       </p>
       <button class="preview-button" type="button" :disabled="!canPreview || previewPending" @click="runPreview">
         {{ previewPending ? 'Menjalankan pratinjau...' : 'Pratinjau' }}
@@ -299,6 +299,9 @@
     <section v-if="applyResult" class="kartu apply-result" aria-live="polite">
       <h2 class="card-title">Penerapan berhasil</h2>
       <p class="field-message">Tabel sumber tetap tidak diubah. Tabel hasil baru sudah selesai diverifikasi.</p>
+      <p v-if="applyResult.historyWarning" class="field-message field-error" role="status">
+        {{ applyResult.historyWarning }}
+      </p>
       <dl class="apply-summary">
         <div>
           <dt>Tabel hasil</dt>
@@ -437,6 +440,7 @@ type ApplyResult = {
   filledRows: number
   ambiguousRowsLeftEmpty: number
   durationMs: number
+  historyWarning?: string | null
 }
 type CategoryKey = 'fillable' | 'ambiguous' | 'remainingEmpty'
 type CategoryDefinition = { key: CategoryKey; label: string; countKey: 'fillableRows' | 'ambiguousRows' | 'remainingEmptyRows' }
@@ -562,6 +566,19 @@ async function loadDatabases() {
   try {
     const response = await $fetch<CatalogResponse<Database>>('/api/databases')
     databases.value = response.data
+    if (sourceDatabase.value && !databases.value.some(({ name }) => name === sourceDatabase.value)) {
+      source.setDatabase(null)
+      sourceTables.value = []
+      sourceColumns.value = []
+    }
+    if (masterDatabase.value && !databases.value.some(({ name }) => name === masterDatabase.value)) {
+      masterDatabase.value = ''
+      masterTables.value = []
+      masterTable.value = ''
+      masterColumns.value = []
+      masterColumn.value = ''
+      masterFillColumn.value = ''
+    }
   } catch (error) {
     databasesError.value = getErrorMessage(error, 'Daftar database tidak dapat dimuat.')
   } finally {

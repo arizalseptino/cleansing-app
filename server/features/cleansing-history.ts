@@ -58,11 +58,7 @@ export async function ensureCleansingHistoryTable(
 }
 
 function jsonParameters(parameters: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(parameters) ?? '{}'
-  } catch {
-    return '{}'
-  }
+  return JSON.stringify(parameters) ?? '{}'
 }
 
 export async function recordCleansingHistory(

@@ -30,6 +30,12 @@
           </svg>
           Cleansing
         </NuxtLink>
+        <NuxtLink to="/riwayat">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4.5v4h4M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          Riwayat
+        </NuxtLink>
       </nav>
 
       <div class="sidebar-spacer" />
@@ -65,6 +71,7 @@ const route = useRoute()
 const breadcrumbTitle = computed(() => {
   if (route.path === '/sumber-data') return 'Sumber data'
   if (route.path === '/cleansing') return 'Cleansing'
+  if (route.path === '/riwayat') return 'Riwayat'
   return 'Ringkasan'
 })
 const { status, version } = useClickHouseStatus()
