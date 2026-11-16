@@ -1,4 +1,5 @@
 import type { OperationDefinition } from '../types'
+import { quoteSortingKey } from '../../features/metadata'
 import { ensureColumnExists, normalizeColumnName, quoteIdentifier } from '../utils'
 
 const addColumn: OperationDefinition = {
@@ -56,8 +57,15 @@ const addColumn: OperationDefinition = {
     }
     if (kind === 'sequence') {
       const orderColumn = ensureColumnExists(context.schema, String(context.params.orderColumn ?? ''), 'Kolom pengurut')
-      const quotedOrderColumn = quoteIdentifier(orderColumn)
-      expression = `rowNumberInAllBlocks() OVER (ORDER BY ${quotedOrderColumn})`
+      const sortKey = context.metadata.sorting_key.trim()
+        && !/^tuple\(\)$/i.test(context.metadata.sorting_key.trim())
+        ? quoteSortingKey(context.metadata.sorting_key, context.schema)
+        : { expression: '', columns: [] as string[] }
+      const orderBy = [quoteIdentifier(orderColumn)]
+      if (sortKey.expression && sortKey.columns.some((column) => column !== orderColumn)) {
+        orderBy.push(sortKey.expression)
+      }
+      expression = `row_number() OVER (ORDER BY ${orderBy.join(', ')})`
     }
     if (kind === 'combine') {
       const columns = Array.isArray(context.params.columns) ? context.params.columns as string[] : []

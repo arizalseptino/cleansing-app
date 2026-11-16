@@ -38,7 +38,7 @@ const trimText: OperationDefinition = {
     if (operationSet.has('empty_to_null')) expr = `if(trimBoth(ifNull(${expr}, '')) = '', NULL, ${expr})`
     if (operationSet.has('upper')) expr = `upperUTF8(${expr})`
     if (operationSet.has('lower')) expr = `lowerUTF8(${expr})`
-    if (operationSet.has('title')) expr = `lowerUTF8(${expr})`
+    if (operationSet.has('title')) expr = `initcap(${expr})`
 
     return {
       sql: `SELECT * REPLACE (${expr} AS ${quoted}) FROM __INPUT__`,

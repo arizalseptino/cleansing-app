@@ -20,6 +20,37 @@ export default defineEventHandler(async (event) => {
   }
 
   const compiled = await compilePipeline(client, pipeline)
+  if (orderBy.length > 1) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Pilih satu kolom ORDER BY',
+      message: 'Tabel hasil hanya menerima satu kolom ORDER BY pada formulir ini.',
+    })
+  }
+  if (engine !== 'MergeTree' && engine !== 'ReplacingMergeTree') {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Engine tabel hasil tidak valid',
+      message: 'Pilih engine MergeTree atau ReplacingMergeTree.',
+    })
+  }
+  if (orderBy.length === 1) {
+    const orderColumn = compiled.schema.find((column) => column.name === orderBy[0])
+    if (!orderColumn) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Kolom ORDER BY tidak valid',
+        message: 'Kolom ORDER BY harus dipilih dari skema hasil pipeline.',
+      })
+    }
+    if (/Nullable\s*\(/.test(orderColumn.type)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Kolom ORDER BY tidak boleh Nullable',
+        message: 'Pilih kolom ORDER BY yang tidak bertipe Nullable.',
+      })
+    }
+  }
   const targetDatabase = pipeline.source.database
   const tableIdentifier = `${quoteIdentifier(targetDatabase)}.${quoteIdentifier(resultTableName)}`
 

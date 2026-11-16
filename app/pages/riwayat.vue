@@ -46,7 +46,7 @@
                 <th scope="col">Waktu</th>
                 <th scope="col">Fitur</th>
                 <th scope="col">Sumber ke hasil</th>
-                <th scope="col">Baris terisi</th>
+                <th scope="col">{{ entryColumnLabel }}</th>
                 <th scope="col">Status</th>
                 <th scope="col">Detail</th>
               </tr>
@@ -91,14 +91,28 @@
                 </tr>
                 <tr v-if="expandedEntryId === entry.id" class="history-details-row">
                   <td colspan="6">
-                    <h3>Parameter penerapan</h3>
-                    <pre>{{ formatParameters(entry.parameter) }}</pre>
+                    <h3>{{ entry.fitur_id === 'workbench' ? 'Ringkasan langkah' : 'Parameter penerapan' }}</h3>
+                    <ol v-if="entry.fitur_id === 'workbench' && workbenchHistorySteps(entry.parameter).length" class="history-step-summary">
+                      <li v-for="(step, index) in workbenchHistorySteps(entry.parameter)" :key="`${entry.id}-${index}`">
+                        {{ historyOperationName(step.op) }}
+                        <span v-if="historyTouchedColumns(step.op, step.params).length">
+                          — {{ historyTouchedColumns(step.op, step.params).join(', ') }}
+                        </span>
+                      </li>
+                    </ol>
+                    <p v-else-if="entry.fitur_id === 'workbench'">Ringkasan langkah tidak tersedia pada data riwayat.</p>
+                    <pre v-else>{{ formatParameters(entry.parameter) }}</pre>
                     <p v-if="entry.pesan" class="history-detail-message">
                       Pesan: {{ entry.pesan }}
                     </p>
                     <p class="history-detail-meta">
                       {{ formatNumber(entry.baris_sumber) }} baris sumber ·
-                      {{ formatNumber(entry.baris_ambigu) }} baris ambigu dibiarkan kosong ·
+                      <template v-if="entry.fitur_id === 'workbench'">
+                        {{ formatNumber(entry.baris_terisi) }} baris hasil ·
+                      </template>
+                      <template v-else>
+                        {{ formatNumber(entry.baris_ambigu) }} baris ambigu dibiarkan kosong ·
+                      </template>
                       {{ formatNumber(entry.durasi_ms) }} ms
                     </p>
                   </td>
@@ -150,6 +164,7 @@ type HistoryResponse = {
   limit: number
 }
 type Feature = { id: string; name: string }
+type WorkbenchHistoryStep = { op: string; params: Record<string, unknown> }
 
 const source = useSelectedSource()
 const entries = ref<HistoryEntry[]>([])
@@ -166,6 +181,9 @@ let requestId = 0
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
 const successCount = computed(() => entries.value.filter(({ status }) => status === 'sukses').length)
 const failedCount = computed(() => entries.value.filter(({ status }) => status !== 'sukses').length)
+const entryColumnLabel = computed(() => entries.value.some(({ fitur_id }) => fitur_id === 'workbench')
+  ? 'Baris hasil / terisi'
+  : 'Baris terisi')
 
 function getErrorMessage(error: unknown, fallback = 'Riwayat cleansing tidak dapat dimuat.'): string {
   if (error && typeof error === 'object') {
@@ -200,7 +218,7 @@ async function loadHistory(requestedPage: number) {
 
 async function loadFeatureNames() {
   try {
-    const response = await $fetch<{ data: Feature[] }>('/api/cleansing/features')
+    const response = await $fetch<{ data: Feature[] }>('/api/workbench/ops')
     featureNames.value = Object.fromEntries(response.data.map(({ id, name }) => [id, name]))
   } catch (error) {
     featureNames.value = {}
@@ -212,7 +230,35 @@ async function loadFeatureNames() {
 }
 
 function featureName(id: string): string {
+  if (id === 'workbench') return 'Ruang kerja cleansing'
   return featureNames.value[id] ?? id
+}
+
+function workbenchHistorySteps(value: string): WorkbenchHistoryStep[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || !('steps' in parsed) || !Array.isArray(parsed.steps)) return []
+    return parsed.steps.filter((step): step is WorkbenchHistoryStep =>
+      Boolean(step && typeof step === 'object' && 'op' in step && typeof step.op === 'string'
+        && 'params' in step && step.params && typeof step.params === 'object'),
+    )
+  } catch {
+    return []
+  }
+}
+
+function historyOperationName(id: string): string {
+  return featureNames.value[id] ?? id
+}
+
+function historyTouchedColumns(op: string, params: Record<string, unknown>): string[] {
+  if (op === 'add_column') return typeof params.name === 'string' && params.name ? [params.name] : []
+  if (op === 'fill_from_master') {
+    return typeof params.targetColumn === 'string' && params.targetColumn ? [params.targetColumn] : []
+  }
+  return [...new Set(Object.entries(params)
+    .filter(([key, value]) => /column/i.test(key) && typeof value === 'string' && value)
+    .map(([, value]) => String(value)))]
 }
 
 function formatNumber(value: number): string {
@@ -427,6 +473,16 @@ onMounted(() => {
   background: #fff;
   font-size: 12px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-step-summary {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+  color: #526479;
+  font-size: 13px;
   overflow-wrap: anywhere;
 }
 

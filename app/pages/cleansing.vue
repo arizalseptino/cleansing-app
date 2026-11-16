@@ -1,595 +1,644 @@
 <template>
-  <div class="bento">
+  <div class="workbench-page">
     <header class="bento-heading">
-    <p class="page-kicker">Ruang kerja</p>
-    <h1 class="page-title">Cleansing data</h1>
-    <p class="page-description">
-      Pilih fitur dan kolom untuk melihat perkiraan hasil cleansing pada data ClickHouse.
-    </p>
+      <p class="page-kicker">Ruang kerja</p>
+      <h1 class="page-title">Cleansing data</h1>
+      <p class="page-description">Susun operasi, periksa hasilnya, lalu simpan sebagai tabel baru.</p>
     </header>
 
-    <section class="kartu cleansing-card span-5 row-2" aria-label="Pengaturan pratinjau cleansing">
-      <h2 class="card-title">Atur pratinjau</h2>
-      <div class="cleansing-form">
-        <div class="field-group">
-          <label for="feature-select">Fitur cleansing</label>
-          <select
-            id="feature-select"
-            v-model="selectedFeatureId"
-            :disabled="featuresPending || features.length === 0"
-          >
-            <option value="">Pilih fitur</option>
-            <option v-for="feature in features" :key="feature.id" :value="feature.id">
-              {{ feature.name }}
-            </option>
-          </select>
-          <p v-if="featuresPending" class="field-message" role="status">Memuat daftar fitur...</p>
-          <p v-else-if="featuresError" class="field-message field-error" role="alert">
-            Gagal memuat fitur: {{ featuresError }}
-            <button type="button" class="inline-retry" @click="loadFeatures">Coba lagi</button>
-          </p>
-          <p v-else-if="features.length === 0" class="field-message" role="status">
-            Belum ada fitur cleansing yang tersedia.
-          </p>
-        </div>
-
-        <p v-if="selectedFeature" class="feature-description">{{ selectedFeature.description }}</p>
-
-        <template v-if="selectedFeature">
-          <div class="field-group">
-            <label for="source-database">Database sumber</label>
-            <select
-              id="source-database"
-              :value="sourceDatabase ?? ''"
-              :disabled="databasesPending || databases.length === 0"
-              @change="handleSourceDatabaseChange"
-            >
-              <option value="">Pilih database sumber</option>
-              <option v-for="database in databases" :key="database.name" :value="database.name">
-                {{ database.name }}
-              </option>
-            </select>
-            <p v-if="databasesPending" class="field-message" role="status">Memuat daftar database...</p>
-            <p v-else-if="databasesError" class="field-message field-error" role="alert">
-              Gagal memuat database: {{ databasesError }}
-              <button type="button" class="inline-retry" @click="loadDatabases">Coba lagi</button>
-            </p>
-          </div>
-
-          <div class="field-group">
-            <label for="source-table">Tabel sumber</label>
-            <select
-              id="source-table"
-              :value="sourceTable ?? ''"
-              :disabled="!sourceDatabase || sourceTablesPending || sourceTables.length === 0"
-              @change="handleSourceTableChange"
-            >
-              <option value="">Pilih tabel sumber</option>
-              <option v-for="table in sourceTables" :key="table.name" :value="table.name">
-                {{ table.name }}
-              </option>
-            </select>
-            <p v-if="!sourceDatabase" class="field-message">Pilih database sumber terlebih dahulu.</p>
-            <p v-else-if="sourceTablesPending" class="field-message" role="status">Memuat tabel sumber...</p>
-            <p v-else-if="sourceTablesError" class="field-message field-error" role="alert">
-              Gagal memuat tabel sumber: {{ sourceTablesError }}
-              <button type="button" class="inline-retry" @click="loadSourceTables(sourceDatabase)">Coba lagi</button>
-            </p>
-            <p v-else-if="sourceTables.length === 0" class="field-message" role="status">
-              Tidak ada tabel sumber yang dapat dipilih.
-            </p>
-          </div>
-
-          <div class="field-group">
-            <label for="source-column">Kolom sumber teks</label>
-            <select
-              id="source-column"
-              v-model="sourceColumn"
-              :disabled="!sourceTable || sourceColumnsPending || sourceTextColumns.length === 0"
-            >
-              <option value="">Pilih kolom sumber teks</option>
-              <option v-for="column in sourceTextColumns" :key="column.name" :value="column.name">
-                {{ column.name }} ({{ column.type }})
-              </option>
-            </select>
-            <p v-if="sourceColumnsPending" class="field-message" role="status">Memuat kolom sumber...</p>
-            <p v-else-if="sourceColumnsError" class="field-message field-error" role="alert">
-              Gagal memuat kolom sumber: {{ sourceColumnsError }}
-              <button
-                v-if="sourceDatabase && sourceTable"
-                type="button"
-                class="inline-retry"
-                @click="loadSourceColumns(sourceDatabase, sourceTable)"
-              >
-                Coba lagi
-              </button>
-            </p>
-            <p v-else-if="sourceTable && sourceTextColumns.length === 0" class="field-message" role="status">
-              Tabel ini tidak memiliki kolom bertipe teks yang didukung.
-            </p>
-          </div>
-
-          <div class="field-group">
-            <label for="target-column">Kolom target kosong</label>
-            <select
-              id="target-column"
-              v-model="targetColumn"
-              :disabled="!sourceTable || sourceColumnsPending || sourceTextColumns.length === 0"
-            >
-              <option value="">Pilih kolom target</option>
-              <option v-for="column in sourceTextColumns" :key="column.name" :value="column.name">
-                {{ column.name }} ({{ column.type }})
-              </option>
-            </select>
-          </div>
-
-          <div class="field-group">
-            <label for="master-database">Database master</label>
-            <select
-              id="master-database"
-              v-model="masterDatabase"
-              :disabled="databasesPending || databases.length === 0"
-              @change="handleMasterDatabaseChange"
-            >
-              <option value="">Pilih database master</option>
-              <option v-for="database in databases" :key="database.name" :value="database.name">
-                {{ database.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="field-group">
-            <label for="master-table">Tabel master</label>
-            <select
-              id="master-table"
-              v-model="masterTable"
-              :disabled="!masterDatabase || masterTablesPending || masterTables.length === 0"
-              @change="handleMasterTableChange"
-            >
-              <option value="">Pilih tabel master</option>
-              <option v-for="table in masterTables" :key="table.name" :value="table.name">
-                {{ table.name }}
-              </option>
-            </select>
-            <p v-if="masterTablesPending" class="field-message" role="status">Memuat tabel master...</p>
-            <p v-else-if="masterTablesError" class="field-message field-error" role="alert">
-              Gagal memuat tabel master: {{ masterTablesError }}
-              <button
-                v-if="masterDatabase"
-                type="button"
-                class="inline-retry"
-                @click="loadMasterTables(masterDatabase)"
-              >
-                Coba lagi
-              </button>
-            </p>
-            <p v-else-if="masterDatabase && masterTables.length === 0" class="field-message" role="status">
-              Database ini tidak memiliki tabel yang dapat dipilih.
-            </p>
-          </div>
-
-          <div class="field-group">
-            <label for="master-column">Kolom kunci pencarian</label>
-            <select
-              id="master-column"
-              v-model="masterColumn"
-              :disabled="!masterTable || masterColumnsPending || masterTextColumns.length === 0"
-            >
-              <option value="">Pilih kolom kunci pencarian</option>
-              <option v-for="column in masterTextColumns" :key="column.name" :value="column.name">
-                {{ column.name }} ({{ column.type }})
-              </option>
-            </select>
-            <p v-if="masterColumnsPending" class="field-message" role="status">Memuat kolom master...</p>
-            <p v-else-if="masterColumnsError" class="field-message field-error" role="alert">
-              Gagal memuat kolom master: {{ masterColumnsError }}
-              <button
-                v-if="masterDatabase && masterTable"
-                type="button"
-                class="inline-retry"
-                @click="loadMasterColumns(masterDatabase, masterTable)"
-              >
-                Coba lagi
-              </button>
-            </p>
-            <p v-else-if="masterTable && masterTextColumns.length === 0" class="field-message" role="status">
-              Tabel master ini tidak memiliki kolom bertipe teks yang didukung.
-            </p>
-          </div>
-
-          <div class="field-group">
-            <label for="master-fill-column">Kolom nilai pengisi (opsional)</label>
-            <select
-              id="master-fill-column"
-              v-model="masterFillColumn"
-              :disabled="!masterTable || masterColumnsPending || masterTextColumns.length === 0"
-            >
-              <option value="">Gunakan kolom kunci pencarian sebagai nilai pengisi</option>
-              <option v-for="column in masterTextColumns" :key="column.name" :value="column.name">
-                {{ column.name }} ({{ column.type }})
-              </option>
-            </select>
-          </div>
-        </template>
+    <section class="kartu wb-source" aria-label="Sumber data">
+      <div class="wb-source-title">
+        <h2 class="card-title">Sumber</h2>
+        <p>Tabel sumber tidak diubah oleh pratinjau.</p>
       </div>
-
-      <p class="safety-note">
-        Pratinjau hanya membaca data dan tidak mengubah tabel. Jika diterapkan, hasil akan dibuat sebagai tabel baru.
-      </p>
-      <button class="preview-button" type="button" :disabled="!canPreview || previewPending" @click="runPreview">
-        {{ previewPending ? 'Menjalankan pratinjau...' : 'Pratinjau' }}
-      </button>
-      <p v-if="previewError" class="preview-error" role="alert">{{ previewError }}</p>
+      <div class="wb-source-field">
+        <label for="workbench-database">Database</label>
+        <select
+          id="workbench-database"
+          :title="pipeline.source.database || 'Database'"
+          :value="pipeline.source.database"
+          :disabled="databasesPending || Boolean(databasesError)"
+          @change="changeDatabase"
+        >
+          <option value="">Pilih database</option>
+          <option v-for="database in databases" :key="database.name" :value="database.name">
+            {{ database.name }}
+          </option>
+        </select>
+      </div>
+      <div class="wb-source-field">
+        <label for="workbench-table">Tabel sumber</label>
+        <select
+          id="workbench-table"
+          :title="pipeline.source.table || 'Tabel sumber'"
+          :value="pipeline.source.table"
+          :disabled="!pipeline.source.database || tablesPending || Boolean(tablesError)"
+          @change="changeTable"
+        >
+          <option value="">Pilih tabel</option>
+          <option v-for="table in tables" :key="table.name" :value="table.name">
+            {{ table.name }}
+          </option>
+        </select>
+      </div>
       <button
-        v-if="previewResult"
-        class="apply-open-button"
+        class="wb-button wb-primary wb-save-open"
         type="button"
-        :disabled="!canApply"
-        @click="openApplyConfirmation"
+        :disabled="!canOpenSave"
+        @click="openSaveDialog"
       >
-        Terapkan ke tabel baru
+        Simpan sebagai tabel baru
       </button>
-      <p v-if="previewResult && !previewMatchesCurrentParameters" class="field-message" role="status">
-        Parameter berubah sejak pratinjau. Jalankan pratinjau ulang sebelum menerapkan.
+      <p v-if="databasesPending" class="wb-message" role="status">Memuat daftar database...</p>
+      <p v-else-if="databasesError" class="wb-message wb-error" role="alert">
+        {{ databasesError }} <button class="wb-link-button" type="button" @click="loadDatabases">Coba lagi</button>
       </p>
-    </section>
-
-    <section class="kartu result-card span-7" aria-live="polite">
-      <h2 class="card-title">Statistik pratinjau</h2>
-      <div v-if="previewResult" class="statistics-grid">
-        <article class="statistic-card">
-          <span>Jumlah baris sumber</span>
-          <strong>{{ formatNumber(previewResult.statistics.sourceRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Target kosong</span>
-          <strong>{{ formatNumber(previewResult.statistics.targetEmptyRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Bisa diisi</span>
-          <strong>{{ formatNumber(previewResult.statistics.fillableRows) }}</strong>
-        </article>
-        <article class="statistic-card statistic-warning">
-          <span>Ambigu</span>
-          <strong>{{ formatNumber(previewResult.statistics.ambiguousRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Tetap kosong</span>
-          <strong>{{ formatNumber(previewResult.statistics.remainingEmptyRows) }}</strong>
-        </article>
-      </div>
-      <p v-else class="field-message">Jalankan pratinjau untuk melihat statistik hasil.</p>
-    </section>
-
-    <section v-if="applyResult" class="kartu apply-result span-7" aria-live="polite">
-      <h2 class="card-title">Penerapan berhasil</h2>
-      <p class="field-message">Tabel sumber tetap tidak diubah. Tabel hasil baru sudah selesai diverifikasi.</p>
-      <p v-if="applyResult.historyWarning" class="field-message field-error" role="status">
-        {{ applyResult.historyWarning }}
+      <p v-if="tablesPending" class="wb-message" role="status">Memuat daftar tabel...</p>
+      <p v-else-if="tablesError" class="wb-message wb-error" role="alert">
+        {{ tablesError }} <button class="wb-link-button" type="button" @click="loadTables(pipeline.source.database)">Coba lagi</button>
       </p>
-      <dl class="apply-summary">
-        <div>
-          <dt>Tabel hasil</dt>
-          <dd><code>{{ applyResult.database }}.{{ applyResult.tableName }}</code></dd>
-        </div>
-        <div>
-          <dt>Jumlah baris</dt>
-          <dd>{{ formatNumber(applyResult.rowCount) }}</dd>
-        </div>
-        <div>
-          <dt>Baris terisi</dt>
-          <dd>{{ formatNumber(applyResult.filledRows) }}</dd>
-        </div>
-        <div>
-          <dt>Baris ambigu dibiarkan kosong</dt>
-          <dd>{{ formatNumber(applyResult.ambiguousRowsLeftEmpty) }}</dd>
-        </div>
-        <div>
-          <dt>Durasi</dt>
-          <dd>{{ formatDuration(applyResult.durationMs) }}</dd>
-        </div>
-      </dl>
-      <button class="preview-button" type="button" @click="viewResultTable">
-        Lihat isi tabel hasil
-      </button>
+      <p v-if="persistenceError" class="wb-message wb-error" role="alert">{{ persistenceError }}</p>
     </section>
 
-    <section class="kartu result-card span-7" aria-live="polite">
-      <h2 class="card-title">Contoh hasil</h2>
-      <template v-if="previewResult">
-        <p v-if="!previewResult.orderedBySortingKey" class="field-message" role="status">
-          Tabel sumber tidak memiliki sorting key; urutan contoh baris tidak dijamin.
-        </p>
-        <p v-else class="field-message" role="status">
-          Contoh baris diurutkan menggunakan kolom sorting key tabel sumber.
-        </p>
-
-        <div class="category-tabs" role="tablist" aria-label="Kategori contoh pratinjau">
-          <button
-            v-for="category in categories"
-            :key="category.key"
-            type="button"
-            role="tab"
-            :aria-selected="activeCategory === category.key"
-            :class="{ 'category-tab--active': activeCategory === category.key }"
-            @click="activeCategory = category.key"
-          >
-            {{ category.label }}
-            <span>{{ formatNumber(previewResult.statistics[category.countKey]) }}</span>
+    <div class="wb-grid">
+      <section class="kartu wb-steps-card" aria-label="Langkah cleansing">
+        <div class="wb-card-heading">
+          <div>
+            <p class="page-kicker">Pipeline</p>
+            <h2 class="card-title">Langkah</h2>
+          </div>
+          <button class="wb-button wb-small" type="button" :disabled="!sourceReady" @click="showOperations">
+            Tambah langkah
           </button>
         </div>
 
-        <p v-if="activeExamples.length === 0" class="field-message" role="status">
-          Tidak ada contoh baris untuk kategori {{ activeCategoryLabel }}.
-        </p>
-        <div v-else class="preview-table-viewport">
-          <table class="preview-table">
-            <thead>
-              <tr>
-                <th v-for="column in previewResult.keyColumns" :key="column.valueKey" scope="col">
-                  {{ column.name }} (kunci)
-                </th>
-                <th scope="col">{{ previewResult.sourceColumn }} (sumber)</th>
-                <th scope="col">{{ previewResult.targetColumn }} (sebelum)</th>
-                <th scope="col">{{ previewResult.targetColumn }} (usulan)</th>
-                <th scope="col">Kunci master yang cocok</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, index) in activeExamples" :key="index">
-                <td v-for="column in previewResult.keyColumns" :key="column.valueKey">
-                  {{ displayValue(row[column.valueKey]) }}
-                </td>
-                <td>{{ displayValue(row.__source_text) }}</td>
-                <td>{{ displayValue(row.__target_before) }}</td>
-                <td>{{ displayValue(row.suggested_value) }}</td>
-                <td>{{ displayValue(row.matched_master_key) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </template>
-      <p v-else class="field-message">Contoh baris dan tab kategori akan tersedia setelah pratinjau.</p>
-    </section>
+        <p v-if="!sourceReady" class="wb-message">Pilih database dan tabel untuk memulai.</p>
+        <template v-else>
+          <button
+            class="wb-step wb-source-step"
+            :class="{ 'wb-step-selected': selectedStep === 0 }"
+            type="button"
+            @click="selectStep(0)"
+          >
+            <span class="wb-step-number">0</span>
+            <span class="wb-step-copy">
+              <strong>Data sumber</strong>
+              <small :title="pipeline.source.table">{{ pipeline.source.table }}</small>
+            </span>
+            <span class="wb-status wb-status-valid">Sumber</span>
+          </button>
 
-    <div v-if="showApplyConfirmation" class="confirmation-backdrop" aria-hidden="true"></div>
+          <ol v-if="pipeline.steps.length" class="wb-step-list">
+            <li v-for="(step, index) in pipeline.steps" :key="step.id">
+              <div class="wb-step-row">
+                <button
+                  class="wb-step"
+                  :class="{ 'wb-step-selected': selectedStep === index + 1 }"
+                  type="button"
+                  @click="selectStep(index + 1)"
+                >
+                  <span class="wb-step-number">{{ index + 1 }}</span>
+                  <span class="wb-step-copy">
+                    <strong :title="operationName(step.op)">{{ operationName(step.op) }}</strong>
+                    <small :title="touchedColumns(step).join(', ')">{{ touchedColumns(step).join(', ') || 'Tanpa kolom langsung' }}</small>
+                  </span>
+                  <span class="wb-status" :class="`wb-status-${stepStates[index]?.status ?? 'loading'}`">
+                    {{ stepStatusLabel(stepStates[index]?.status) }}
+                  </span>
+                </button>
+                <div class="wb-step-tools">
+                  <button
+                    class="wb-icon-button"
+                    type="button"
+                    :disabled="index === 0"
+                    :aria-label="`Geser langkah ${index + 1} ke atas`"
+                    @click="moveStep(index, -1)"
+                  >Naik</button>
+                  <button
+                    class="wb-icon-button"
+                    type="button"
+                    :disabled="index === pipeline.steps.length - 1"
+                    :aria-label="`Geser langkah ${index + 1} ke bawah`"
+                    @click="moveStep(index, 1)"
+                  >Turun</button>
+                  <button class="wb-icon-button" type="button" @click="editStep(index)">Edit</button>
+                  <button class="wb-icon-button wb-danger-text" type="button" @click="deleteStep(index)">Hapus</button>
+                </div>
+                <p v-if="stepStates[index]?.status === 'error'" class="wb-step-error" role="alert">
+                  {{ stepStates[index]?.message }}
+                </p>
+              </div>
+            </li>
+          </ol>
+          <p v-else class="wb-message">Belum ada langkah. Tambahkan operasi untuk membentuk hasil.</p>
+        </template>
+
+        <button
+          class="wb-sql-link"
+          type="button"
+          :disabled="!sourceReady || pipeline.steps.length === 0"
+          @click="openSql"
+        >
+          Lihat SQL
+        </button>
+      </section>
+
+      <section class="kartu wb-data-card" aria-label="Data keluaran">
+        <div class="wb-card-heading wb-data-heading">
+          <div class="wb-data-title">
+            <p class="page-kicker">Pratinjau</p>
+            <h2 class="card-title">{{ selectedStep === 0 ? 'Data sumber' : `Hasil langkah ${selectedStep}` }}</h2>
+          </div>
+          <label class="wb-limit-field" for="workbench-limit">
+            Baris per halaman
+            <select id="workbench-limit" :value="limit" @change="changeLimit">
+              <option :value="25">25</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+            </select>
+          </label>
+        </div>
+        <div class="wb-data-actions">
+          <button
+            class="wb-button wb-small"
+            type="button"
+            :disabled="selectedStep === 0 || !sourceReady || previewPending || stepStates[selectedStep - 1]?.status !== 'valid'"
+            @click="loadStatistics"
+          >
+            Hitung statistik langkah ini
+          </button>
+          <span v-if="previewPending" class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
+        </div>
+        <p v-if="!sourceReady" class="wb-message">Pilih sumber untuk melihat data.</p>
+        <p v-else-if="previewPending && previewRows.length === 0" class="wb-message" role="status">Memuat data...</p>
+        <p v-else-if="previewError" class="wb-message wb-error" role="alert">{{ previewError }}</p>
+        <p v-else-if="previewRows.length === 0" class="wb-message" role="status">Tidak ada baris pada halaman ini.</p>
+        <template v-else>
+          <div class="wb-table-viewport">
+            <table class="wb-table">
+              <thead>
+                <tr>
+                  <th v-for="column in visibleColumns" :key="column.name" scope="col">
+                    <div class="wb-column-heading">
+                      <button
+                        class="wb-column-menu-button"
+                        type="button"
+                        :aria-expanded="activeColumnMenu === column.name"
+                        @click="toggleColumnMenu(column.name)"
+                      >
+                        <span class="wb-column-name" :title="column.name">{{ column.name }}</span>
+                      </button>
+                      <small :title="column.type">{{ column.type }}</small>
+                      <div v-if="activeColumnMenu === column.name" class="wb-column-menu">
+                        <strong>Operasi untuk {{ column.name }}</strong>
+                        <button
+                          v-for="operation in columnOperations(column)"
+                          :key="operation.id"
+                          type="button"
+                          @click="chooseOperation(operation, column.name)"
+                        >
+                          {{ operation.name }}
+                        </button>
+                        <p v-if="columnOperations(column).length === 0">Tidak ada operasi yang cocok.</p>
+                      </div>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, rowIndex) in previewRows" :key="`${page}-${rowIndex}`">
+                  <td v-for="column in visibleColumns" :key="column.name">
+                    <span
+                      class="wb-cell"
+                      :class="{
+                        'wb-cell-null': row[column.name] === null,
+                        'wb-cell-empty': row[column.name] === '',
+                        'wb-cell-changed': isChanged(row, column.name),
+                      }"
+                      :title="cellTitle(row, column.name)"
+                    >
+                      {{ displayValue(row[column.name]) }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <nav class="wb-pagination" aria-label="Halaman data pratinjau">
+            <span>{{ numberFormat(totalRows) }} baris · Halaman {{ page }} dari {{ totalPages }}</span>
+            <div>
+              <button class="wb-button wb-small" type="button" :disabled="page <= 1 || previewPending" @click="changePage(page - 1)">
+                Sebelumnya
+              </button>
+              <button class="wb-button wb-small" type="button" :disabled="page >= totalPages || previewPending" @click="changePage(page + 1)">
+                Berikutnya
+              </button>
+            </div>
+          </nav>
+        </template>
+
+        <section v-if="statistics" class="wb-statistics" aria-live="polite">
+          <h3>Statistik langkah {{ selectedStep }}</h3>
+          <p>{{ numberFormat(statistics.totalRows) }} baris diperiksa.</p>
+          <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
+            <strong>{{ columnName }}</strong>
+            <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
+            <span>Menjadi NULL: {{ numberFormat(columnStats.becameNull) }}</span>
+            <span>NULL menjadi terisi: {{ numberFormat(columnStats.wasNullThenFilled) }}</span>
+          </div>
+          <div v-for="(value, key) in statisticExtras" :key="key" class="wb-stat-column">
+            <strong>{{ key }}</strong>
+            <span>{{ typeof value === 'number' ? numberFormat(value) : formatJson(value) }}</span>
+          </div>
+          <p v-if="Object.keys(statistics.stats).length === 0">API tidak mengirimkan statistik per kolom.</p>
+          <p class="wb-warning" role="status">
+            Endpoint statistik saat ini belum menghitung perubahan dan mengirim nilai nol; angka ini belum dapat dijadikan hasil pengukuran.
+          </p>
+          <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
+        </section>
+      </section>
+
+      <section class="kartu wb-operations-card" aria-label="Operasi">
+        <div class="wb-card-heading">
+          <div>
+            <p class="page-kicker">Buat perubahan</p>
+            <h2 class="card-title">Operasi</h2>
+          </div>
+          <button v-if="selectedOperation" class="wb-link-button" type="button" @click="resetOperationForm">
+            Kembali
+          </button>
+        </div>
+        <p v-if="operationsPending" class="wb-message" role="status">Memuat daftar operasi...</p>
+        <p v-else-if="operationsError" class="wb-message wb-error" role="alert">
+          {{ operationsError }} <button class="wb-link-button" type="button" @click="loadOperations">Coba lagi</button>
+        </p>
+        <template v-else-if="selectedOperation">
+          <h3 class="wb-operation-name">{{ selectedOperation.name }}</h3>
+          <p v-if="masterColumnsError" class="wb-message wb-error" role="alert">{{ masterColumnsError }}</p>
+          <WorkbenchOperationForm
+            :key="formKey"
+            :operation="selectedOperation"
+            :schema="schemaBeforeSelectedStep"
+            :master-columns="masterColumns"
+            :databases="databases"
+            :tables-by-database="tablesByDatabase"
+            :initial-params="formInitialParams"
+            :editing="editingStepIndex !== null"
+            :prefilled-column="prefilledColumn"
+            @submit="commitForm"
+            @database-change="loadTables"
+            @table-change="loadMasterColumns"
+          />
+        </template>
+        <template v-else>
+          <p class="wb-message">Pilih operasi untuk mengatur langkah baru.</p>
+          <ul class="wb-operation-list">
+            <li v-for="operation in operations" :key="operation.id">
+              <button type="button" :disabled="!sourceReady" @click="chooseOperation(operation)">
+                <strong>{{ operation.name }}</strong>
+                <span>{{ operation.description }}</span>
+              </button>
+            </li>
+          </ul>
+        </template>
+      </section>
+    </div>
+
+    <div v-if="showSqlPanel || showSaveDialog" class="wb-backdrop" @click.self="closePanels" />
     <section
-      v-if="showApplyConfirmation"
-      class="kartu apply-confirmation span-12"
+      v-if="showSqlPanel"
+      class="kartu wb-dialog wb-sql-dialog"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="apply-confirmation-title"
+      aria-labelledby="wb-sql-title"
+      tabindex="-1"
+      @keydown="handleDialogKeydown"
     >
-      <h2 id="apply-confirmation-title" class="card-title">Konfirmasi tabel hasil</h2>
-      <div class="field-group">
-        <label for="result-table-name">Nama tabel hasil</label>
-        <input
-          id="result-table-name"
-          v-model="resultTableName"
-          type="text"
-          maxlength="64"
-          autocomplete="off"
-          :disabled="applying"
-        />
-        <p v-if="!resultNameValid" class="field-message field-error" role="alert">
-          Nama harus diawali huruf dan hanya berisi huruf, angka, atau garis bawah (maksimal 64 karakter).
-        </p>
+      <div class="wb-dialog-heading">
+        <h2 id="wb-sql-title" class="card-title">SQL pratinjau</h2>
+        <button class="wb-icon-button" type="button" @click="showSqlPanel = false">Tutup</button>
       </div>
-      <label class="save-original-option">
-        <input v-model="saveOriginal" type="checkbox" :disabled="applying" />
-        <span>Simpan nilai lama di kolom <code>{{ targetOriginalColumnName }}</code></span>
-      </label>
-
-      <dl class="apply-summary">
-        <div>
-          <dt>Tabel sumber</dt>
-          <dd><code>{{ sourceDatabase }}.{{ sourceTable }}</code> tidak akan diubah.</dd>
-        </div>
-        <div>
-          <dt>Tabel hasil yang dibuat</dt>
-          <dd><code>{{ sourceDatabase }}.{{ resultTableName || '(nama belum diisi)' }}</code></dd>
-        </div>
-        <div>
-          <dt>Perkiraan baris yang akan terisi</dt>
-          <dd>{{ formatNumber(previewResult?.statistics.fillableRows ?? 0) }}</dd>
-        </div>
-      </dl>
-
-      <p v-if="!canApply" class="field-message field-error" role="alert">
-        Parameter tidak sama dengan pratinjau. Tutup konfirmasi dan jalankan pratinjau ulang.
-      </p>
-      <p v-if="applyError" class="preview-error" role="alert">{{ applyError }}</p>
-      <p v-if="applying" class="field-message" role="status">
-        Sedang membuat dan mengisi tabel hasil. Mohon tunggu...
-      </p>
-      <div class="apply-actions">
-        <button
-          class="preview-button"
-          type="button"
-          :disabled="!canApply || !resultNameValid || applying"
-          @click="applyToNewTable"
-        >
-          {{ applying ? 'Sedang menerapkan...' : 'Ya, buat tabel hasil' }}
+      <p class="wb-message">Query ini hanya untuk dibaca. Parameter dikirim terpisah.</p>
+      <p v-if="sqlPending" class="wb-message" role="status">Memuat SQL...</p>
+      <p v-else-if="sqlError" class="wb-message wb-error" role="alert">{{ sqlError }}</p>
+      <template v-else-if="sqlResult">
+        <pre class="wb-code">{{ sqlResult.sql }}</pre>
+        <h3>Parameter</h3>
+        <pre class="wb-code">{{ formatJson(sqlResult.params) }}</pre>
+        <button class="wb-button" type="button" @click="copySql">
+          {{ sqlCopied ? 'Disalin' : 'Salin SQL' }}
         </button>
-        <button class="cancel-button" type="button" :disabled="applying" @click="showApplyConfirmation = false">
-          Batal
+        <button class="wb-button" type="button" @click="copyParameters">
+          {{ parametersCopied ? 'Parameter disalin' : 'Salin parameter' }}
         </button>
-      </div>
+        <p v-if="copyError" class="wb-error" role="alert">{{ copyError }}</p>
+      </template>
     </section>
 
+    <section
+      v-if="showSaveDialog"
+      class="kartu wb-dialog wb-save-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-save-title"
+      tabindex="-1"
+      @keydown="handleDialogKeydown"
+    >
+      <div class="wb-dialog-heading">
+        <h2 id="wb-save-title" class="card-title">{{ applyResult ? 'Tabel baru berhasil dibuat' : 'Simpan sebagai tabel baru' }}</h2>
+        <button v-if="!applying" class="wb-icon-button" type="button" @click="closeSaveDialog">Tutup</button>
+      </div>
+      <template v-if="applyResult">
+        <p class="wb-safety-note">Tabel sumber tetap tidak diubah.</p>
+        <dl class="wb-summary">
+          <div><dt>Tabel hasil</dt><dd><code>{{ applyResult.database }}.{{ applyResult.table }}</code></dd></div>
+          <div><dt>Jumlah baris</dt><dd>{{ numberFormat(applyResult.rows) }}</dd></div>
+          <div><dt>Jumlah langkah</dt><dd>{{ numberFormat(applyResult.steps) }}</dd></div>
+          <div><dt>Durasi</dt><dd>{{ applyResult.durationMs === undefined ? 'Tidak dikirim API' : `${numberFormat(applyResult.durationMs)} ms` }}</dd></div>
+          <div><dt>Verifikasi</dt><dd>{{ applyResult.verification ?? 'Hasil verifikasi tidak dikirim API.' }}</dd></div>
+        </dl>
+        <button class="wb-button wb-primary" type="button" @click="viewResultTable">Lihat isi tabel hasil</button>
+      </template>
+      <template v-else>
+        <form class="wb-save-form" @submit.prevent="applyPipeline">
+          <p class="wb-safety-note">Tabel sumber <code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> tidak akan diubah.</p>
+          <label for="wb-result-name">Nama tabel hasil</label>
+          <input id="wb-result-name" v-model="resultTableName" maxlength="64" required :disabled="applying" />
+          <p v-if="resultTableName && !validResultName" class="wb-error" role="alert">
+            Nama harus diawali huruf dan hanya berisi huruf, angka, atau garis bawah.
+          </p>
+
+          <label for="wb-result-engine">Engine</label>
+          <select id="wb-result-engine" v-model="resultEngine" :disabled="applying">
+            <option value="MergeTree">MergeTree</option>
+            <option value="ReplacingMergeTree">ReplacingMergeTree</option>
+          </select>
+
+          <fieldset class="wb-order-fields" :disabled="applying">
+            <legend>Kolom ORDER BY</legend>
+            <p>Pilih satu kolom untuk mengurutkan tabel hasil.</p>
+            <label v-for="column in finalSchema" :key="column.name" class="wb-order-option">
+              <input
+                :checked="orderBy[0] === column.name"
+                type="radio"
+                name="wb-result-order-by"
+                :disabled="isNullable(column.type)"
+                @change="selectOrderBy(column.name)"
+              />
+              <span>{{ column.name }} <small>({{ column.type }})</small></span>
+              <small v-if="isNullable(column.type)" class="wb-nullable-note">Kolom Nullable tidak dapat dipilih.</small>
+            </label>
+          </fieldset>
+
+          <label class="wb-save-original">
+            <input v-model="saveOriginal" type="checkbox" disabled />
+            <span>
+              Simpan nilai sebelum perubahan
+              <template v-if="originalColumnNames.length">
+                di <code>{{ originalColumnNames.map((column) => `${column}_asli`).join(', ') }}</code>
+              </template>
+            </span>
+          </label>
+          <p class="wb-warning" role="status">
+            Belum tersedia, jadi opsi ini dinonaktifkan. Jika kelak diaktifkan, yang disalin adalah nilai awal kolom yang diubah, bukan nilai kolom baru seperti Nomor.
+          </p>
+
+          <div>
+            <h3>Ringkasan langkah</h3>
+            <ol class="wb-summary-steps">
+              <li v-for="(step, index) in pipeline.steps" :key="step.id">
+                {{ index + 1 }}. {{ operationName(step.op) }} — {{ touchedColumns(step).join(', ') || 'Tanpa kolom langsung' }}
+              </li>
+            </ol>
+          </div>
+          <div>
+            <h3>Kolom hasil</h3>
+            <ul class="wb-result-columns">
+              <li v-for="column in finalSchema" :key="column.name">{{ column.name }} <small>({{ column.type }})</small></li>
+            </ul>
+          </div>
+          <p v-if="applyError" class="wb-error" role="alert">{{ applyError }}</p>
+          <p v-if="applying" class="wb-message" role="status">Sedang membuat tabel baru. Mohon tunggu...</p>
+          <div class="wb-dialog-actions">
+            <button class="wb-button wb-primary" type="submit" :disabled="!canApply || applying">
+              {{ applying ? 'Sedang membuat...' : 'Ya, buat tabel' }}
+            </button>
+            <button class="wb-button" type="button" :disabled="applying" @click="closeSaveDialog">Batal</button>
+          </div>
+        </form>
+      </template>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-type Database = { name: string }
-type Table = { name: string; engine: string }
-type Column = { name: string; type: string }
-type FeatureParameter = { key: string; label: string; description: string; kind: string }
-type Feature = { id: string; name: string; description: string; parameters: FeatureParameter[] }
-type PreviewResult = {
-  statistics: {
-    sourceRows: number
-    targetEmptyRows: number
-    fillableRows: number
-    ambiguousRows: number
-    remainingEmptyRows: number
-  }
-  keyColumns: { name: string; valueKey: string }[]
-  sourceColumn: string
-  targetColumn: string
-  examples: {
-    fillable: Record<string, unknown>[]
-    ambiguous: Record<string, unknown>[]
-    remainingEmpty: Record<string, unknown>[]
-  }
-  orderedBySortingKey: boolean
-}
-type ApplyResult = {
-  database: string
-  tableName: string
-  rowCount: number
-  filledRows: number
-  ambiguousRowsLeftEmpty: number
-  durationMs: number
-  historyWarning?: string | null
-}
-type CategoryKey = 'fillable' | 'ambiguous' | 'remainingEmpty'
-type CategoryDefinition = { key: CategoryKey; label: string; countKey: 'fillableRows' | 'ambiguousRows' | 'remainingEmptyRows' }
-type CatalogResponse<T> = { data: T[] }
+import type { WorkbenchStep } from '~/composables/useWorkbench'
 
-const source = useSelectedSource()
-const sourceDatabase = source.database
-const sourceTable = source.table
-const features = ref<Feature[]>([])
-const selectedFeatureId = ref('')
-const featuresPending = ref(true)
-const featuresError = ref('')
+type Database = { name: string }
+type Table = { name: string; engine?: string }
+type Column = { name: string; type: string }
+type OperationParam = { key: string; label: string; description: string; type: string; required?: boolean; options?: string[] }
+type Operation = { id: string; name: string; description: string; params: OperationParam[] }
+type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; message?: string }
+type PreviewRow = Record<string, unknown>
+type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number }
+type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string }> }
+type StatisticsResponse = {
+  totalRows: number
+  stats: Record<string, { changed: number; becameNull: number; wasNullThenFilled: number }>
+  [key: string]: unknown
+}
+type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[] }
+type ApplyResponse = {
+  status: string
+  database: string
+  table: string
+  rows: number
+  steps: number
+  durationMs?: number
+  verification?: string
+}
+
+const workbench = useWorkbench()
+const { pipeline, selectedStep, page, limit, persistenceError } = workbench
+const selectedSource = useSelectedSource()
 const databases = ref<Database[]>([])
-const databasesPending = ref(true)
-const databasesError = ref('')
-const sourceTables = ref<Table[]>([])
-const sourceTablesPending = ref(false)
-const sourceTablesError = ref('')
+const tables = ref<Table[]>([])
+const tablesByDatabase = reactive<Record<string, Table[]>>({})
+const operations = ref<Operation[]>([])
 const sourceColumns = ref<Column[]>([])
-const sourceColumnsPending = ref(false)
-const sourceColumnsError = ref('')
-const sourceColumn = ref('')
-const targetColumn = ref('')
-const masterDatabase = ref('')
-const masterTables = ref<Table[]>([])
-const masterTablesPending = ref(false)
-const masterTablesError = ref('')
-const masterTable = ref('')
-const masterColumns = ref<Column[]>([])
-const masterColumnsPending = ref(false)
+const stepStates = ref<StepState[]>([])
+const databasesPending = ref(false)
+const tablesPending = ref(false)
+const operationsPending = ref(false)
+const databasesError = ref('')
+const tablesError = ref('')
+const operationsError = ref('')
 const masterColumnsError = ref('')
-const masterColumn = ref('')
-const masterFillColumn = ref('')
 const previewPending = ref(false)
 const previewError = ref('')
-const previewResult = ref<PreviewResult | null>(null)
-const previewSignature = ref('')
-const activeCategory = ref<CategoryKey>('fillable')
-const showApplyConfirmation = ref(false)
+const previewRows = ref<PreviewRow[]>([])
+const totalRows = ref(0)
+const statistics = ref<StatisticsResponse | null>(null)
+const statisticsError = ref('')
+const sqlPending = ref(false)
+const sqlError = ref('')
+const sqlResult = ref<SqlResponse | null>(null)
+const sqlCopied = ref(false)
+const parametersCopied = ref(false)
+const copyError = ref('')
+const selectedOperationId = ref('')
+const formInitialParams = ref<Record<string, unknown>>({})
+const editingStepIndex = ref<number | null>(null)
+const insertAtIndex = ref<number | null>(null)
+const prefilledColumn = ref('')
+const formKey = ref(0)
+const activeColumnMenu = ref('')
+const showSqlPanel = ref(false)
+const showSaveDialog = ref(false)
 const resultTableName = ref('')
-const saveOriginal = ref(true)
+const resultEngine = ref('MergeTree')
+const orderBy = ref<string[]>([])
+const saveOriginal = ref(false)
 const applying = ref(false)
 const applyError = ref('')
-const applyResult = ref<ApplyResult | null>(null)
-const categories: CategoryDefinition[] = [
-  { key: 'fillable', label: 'Bisa diisi', countKey: 'fillableRows' },
-  { key: 'ambiguous', label: 'Ambigu', countKey: 'ambiguousRows' },
-  { key: 'remainingEmpty', label: 'Tetap kosong', countKey: 'remainingEmptyRows' },
-]
+const applyResult = ref<ApplyResponse | null>(null)
+const masterColumns = ref<Column[]>([])
 
-const textTypes = new Set(['String', 'Nullable(String)', 'LowCardinality(String)'])
-const sourceTextColumns = computed(() => sourceColumns.value.filter(({ type }) => textTypes.has(type)))
-const masterTextColumns = computed(() => masterColumns.value.filter(({ type }) => textTypes.has(type)))
-const selectedFeature = computed(() => features.value.find(({ id }) => id === selectedFeatureId.value))
-const activeExamples = computed(() => previewResult.value?.examples[activeCategory.value] ?? [])
-const activeCategoryLabel = computed(() => categories.find(({ key }) => key === activeCategory.value)?.label ?? '')
-const currentPreviewSignature = computed(() => JSON.stringify({
-  featureId: selectedFeatureId.value,
-  parameters: getPreviewParameters(),
-}))
-const previewMatchesCurrentParameters = computed(() => Boolean(
-  previewSignature.value && previewSignature.value === currentPreviewSignature.value,
-))
-const canApply = computed(() => Boolean(
-  previewResult.value
-  && previewMatchesCurrentParameters.value
+let previewController: AbortController | null = null
+let previewRequest = 0
+let schemaRequest = 0
+let statisticsRequest = 0
+let masterColumnsRequest = 0
+let returnFocusElement: HTMLElement | null = null
+
+const sourceReady = computed(() => Boolean(pipeline.value.source.database && pipeline.value.source.table))
+const selectedOperation = computed(() => operations.value.find(({ id }) => id === selectedOperationId.value) ?? null)
+const visibleColumns = computed(() => {
+  const schema = selectedStep.value === 0
+    ? sourceColumns.value
+    : stepStates.value[selectedStep.value - 1]?.schema ?? []
+  return schema.filter(({ name }) => !name.startsWith('__sebelum_'))
+})
+const finalSchema = computed(() => pipeline.value.steps.length
+  ? stepStates.value[pipeline.value.steps.length - 1]?.schema ?? []
+  : sourceColumns.value)
+const schemaBeforeSelectedStep = computed(() => selectedStep.value > 0
+  ? editingStepIndex.value !== null
+    ? stepStates.value[editingStepIndex.value - 1]?.schema ?? sourceColumns.value
+    : insertAtIndex.value !== null
+      ? insertAtIndex.value > 0
+        ? stepStates.value[insertAtIndex.value - 1]?.schema ?? sourceColumns.value
+        : sourceColumns.value
+      : finalSchema.value
+  : editingStepIndex.value !== null
+    ? sourceColumns.value
+    : insertAtIndex.value !== null
+      ? insertAtIndex.value > 0
+        ? stepStates.value[insertAtIndex.value - 1]?.schema ?? sourceColumns.value
+        : sourceColumns.value
+      : finalSchema.value)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / limit.value)))
+const touchedColumnsForStats = computed(() => {
+  const step = pipeline.value.steps[selectedStep.value - 1]
+  return step ? touchedColumns(step) : []
+})
+const statisticExtras = computed(() => {
+  if (!statistics.value) return {}
+  const { totalRows: _totalRows, stats: _stats, ...extras } = statistics.value
+  return extras
+})
+const validResultName = computed(() => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(resultTableName.value))
+const originalColumnNames = computed(() => [...new Set(
+  pipeline.value.steps
+    .filter((step) => step.op !== 'add_column')
+    .flatMap((step) => touchedColumns(step)),
+)])
+const canApply = computed(() => sourceReady.value
+  && pipeline.value.steps.length > 0
+  && validResultName.value
   && !applying.value
-  && !applyResult.value,
-))
-const resultNameValid = computed(() => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(resultTableName.value))
-const targetOriginalColumnName = computed(() => `${targetColumn.value}_asli`)
-const canPreview = computed(() => Boolean(
-  selectedFeature.value
-  && sourceDatabase.value
-  && sourceTable.value
-  && sourceColumn.value
-  && targetColumn.value
-  && masterDatabase.value
-  && masterTable.value
-  && masterColumn.value,
-))
+  && stepStates.value.length === pipeline.value.steps.length
+  && stepStates.value.every(({ status }) => status === 'valid'))
+const canOpenSave = computed(() => sourceReady.value
+  && pipeline.value.steps.length > 0
+  && stepStates.value.length === pipeline.value.steps.length
+  && stepStates.value.every(({ status }) => status === 'valid'))
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object') {
     if ('data' in error && error.data && typeof error.data === 'object'
-      && 'message' in error.data && typeof error.data.message === 'string') {
-      return error.data.message
-    }
+      && 'message' in error.data && typeof error.data.message === 'string') return error.data.message
     if ('message' in error && typeof error.message === 'string') return error.message
   }
   return fallback
 }
 
-function getPreviewParameters(): Record<string, string | undefined> {
-  return {
-    sourceDatabase: sourceDatabase.value ?? undefined,
-    sourceTable: sourceTable.value ?? undefined,
-    sourceColumn: sourceColumn.value || undefined,
-    targetColumn: targetColumn.value || undefined,
-    masterDatabase: masterDatabase.value || undefined,
-    masterTable: masterTable.value || undefined,
-    masterColumn: masterColumn.value || undefined,
-    masterFillColumn: masterFillColumn.value || undefined,
-  }
+function numberFormat(value: number): string {
+  return new Intl.NumberFormat('id-ID').format(Number(value) || 0)
 }
 
-async function loadFeatures() {
-  featuresPending.value = true
-  featuresError.value = ''
-  try {
-    const response = await $fetch<CatalogResponse<Feature>>('/api/cleansing/features')
-    features.value = response.data
-  } catch (error) {
-    featuresError.value = getErrorMessage(error, 'Daftar fitur tidak dapat dimuat.')
-  } finally {
-    featuresPending.value = false
-  }
+function formatJson(value: unknown): string {
+  return JSON.stringify(value, null, 2) ?? '{}'
 }
 
-async function loadDatabases() {
+function displayValue(value: unknown): string {
+  if (value === null) return 'NULL'
+  if (value === '') return '(string kosong)'
+  if (typeof value === 'string' && /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(value)) {
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'object') return JSON.stringify(value) ?? String(value)
+  return String(value)
+}
+
+function isChanged(row: PreviewRow, column: string): boolean {
+  const previousKey = `__sebelum_${column}`
+  if (!(previousKey in row)) return false
+  return JSON.stringify(row[column]) !== JSON.stringify(row[previousKey])
+}
+
+function cellTitle(row: PreviewRow, column: string): string {
+  const current = displayValue(row[column])
+  if (isChanged(row, column)) return `Nilai sebelumnya: ${displayValue(row[`__sebelum_${column}`])} · Nilai sekarang: ${current}`
+  return current
+}
+
+function operationName(id: string): string {
+  return operations.value.find((operation) => operation.id === id)?.name ?? id
+}
+
+function touchedColumns(step: WorkbenchStep): string[] {
+  if (step.op === 'add_column') {
+    return typeof step.params.name === 'string' && step.params.name ? [step.params.name] : []
+  }
+  if (step.op === 'fill_from_master') {
+    return typeof step.params.targetColumn === 'string' && step.params.targetColumn
+      ? [step.params.targetColumn]
+      : []
+  }
+  const values = Object.entries(step.params)
+    .filter(([key, value]) => /column/i.test(key) && typeof value === 'string' && value)
+    .map(([, value]) => String(value))
+  return [...new Set(values)]
+}
+
+function stepStatusLabel(status?: StepState['status']): string {
+  if (status === 'valid') return 'Valid'
+  if (status === 'error') return 'Kesalahan'
+  return 'Sedang dihitung'
+}
+
+function isNullable(type: string): boolean {
+  return /Nullable\s*\(/.test(type)
+}
+
+async function loadDatabases(): Promise<void> {
   databasesPending.value = true
   databasesError.value = ''
   try {
-    const response = await $fetch<CatalogResponse<Database>>('/api/databases')
+    const response = await $fetch<{ data: Database[] }>('/api/databases')
     databases.value = response.data
-    if (sourceDatabase.value && !databases.value.some(({ name }) => name === sourceDatabase.value)) {
-      source.setDatabase(null)
-      sourceTables.value = []
-      sourceColumns.value = []
-    }
-    if (masterDatabase.value && !databases.value.some(({ name }) => name === masterDatabase.value)) {
-      masterDatabase.value = ''
-      masterTables.value = []
-      masterTable.value = ''
-      masterColumns.value = []
-      masterColumn.value = ''
-      masterFillColumn.value = ''
-    }
   } catch (error) {
     databasesError.value = getErrorMessage(error, 'Daftar database tidak dapat dimuat.')
   } finally {
@@ -597,609 +646,1275 @@ async function loadDatabases() {
   }
 }
 
-async function loadSourceTables(database: string) {
-  sourceTablesPending.value = true
-  sourceTablesError.value = ''
-  sourceTables.value = []
-  sourceColumns.value = []
-  sourceColumn.value = ''
-  targetColumn.value = ''
+async function loadTables(database: string): Promise<void> {
+  if (!database) return
+  const isSourceDatabase = database === pipeline.value.source.database
+  if (isSourceDatabase) {
+    tablesPending.value = true
+    tablesError.value = ''
+    tables.value = []
+  }
   try {
-    const response = await $fetch<CatalogResponse<Table>>('/api/tables', { query: { database } })
-    if (sourceDatabase.value !== database) return
-    sourceTables.value = response.data
-    if (sourceTable.value && !sourceTables.value.some(({ name }) => name === sourceTable.value)) {
-      source.setTable(null)
-    }
+    const response = await $fetch<{ data: Table[] }>('/api/tables', { query: { database } })
+    tablesByDatabase[database] = response.data
+    if (pipeline.value.source.database === database) tables.value = response.data
   } catch (error) {
-    if (sourceDatabase.value === database) {
-      sourceTablesError.value = getErrorMessage(error, 'Daftar tabel sumber tidak dapat dimuat.')
-    }
+    if (isSourceDatabase) tablesError.value = getErrorMessage(error, 'Daftar tabel tidak dapat dimuat.')
   } finally {
-    if (sourceDatabase.value === database) sourceTablesPending.value = false
+    if (isSourceDatabase) tablesPending.value = false
   }
 }
 
-async function loadSourceColumns(database: string, table: string) {
-  sourceColumnsPending.value = true
-  sourceColumnsError.value = ''
+async function loadSourceColumns(database: string, table: string): Promise<void> {
   sourceColumns.value = []
-  sourceColumn.value = ''
-  targetColumn.value = ''
+  if (!database || !table) return
   try {
-    const response = await $fetch<CatalogResponse<Column>>('/api/columns', { query: { database, table } })
-    if (sourceDatabase.value === database && sourceTable.value === table) {
+    const response = await $fetch<{ data: Column[] }>('/api/columns', { query: { database, table } })
+    if (pipeline.value.source.database === database && pipeline.value.source.table === table) {
       sourceColumns.value = response.data
     }
   } catch (error) {
-    if (sourceDatabase.value === database && sourceTable.value === table) {
-      sourceColumnsError.value = getErrorMessage(error, 'Daftar kolom sumber tidak dapat dimuat.')
-    }
-  } finally {
-    if (sourceDatabase.value === database && sourceTable.value === table) sourceColumnsPending.value = false
+    previewError.value = getErrorMessage(error, 'Skema tabel sumber tidak dapat dimuat.')
   }
 }
 
-async function loadMasterTables(database: string) {
-  masterTablesPending.value = true
-  masterTablesError.value = ''
-  masterTables.value = []
-  masterTable.value = ''
+async function loadMasterColumns(database: string, table: string): Promise<void> {
+  const request = ++masterColumnsRequest
   masterColumns.value = []
-  masterColumn.value = ''
-  masterFillColumn.value = ''
-  try {
-    const response = await $fetch<CatalogResponse<Table>>('/api/tables', { query: { database } })
-    if (masterDatabase.value === database) masterTables.value = response.data
-  } catch (error) {
-    if (masterDatabase.value === database) {
-      masterTablesError.value = getErrorMessage(error, 'Daftar tabel master tidak dapat dimuat.')
-    }
-  } finally {
-    if (masterDatabase.value === database) masterTablesPending.value = false
-  }
-}
-
-async function loadMasterColumns(database: string, table: string) {
-  masterColumnsPending.value = true
   masterColumnsError.value = ''
-  masterColumns.value = []
-  masterColumn.value = ''
-  masterFillColumn.value = ''
+  if (!database || !table) return
   try {
-    const response = await $fetch<CatalogResponse<Column>>('/api/columns', { query: { database, table } })
-    if (masterDatabase.value === database && masterTable.value === table) {
-      masterColumns.value = response.data
-    }
+    const response = await $fetch<{ data: Column[] }>('/api/columns', { query: { database, table } })
+    if (request === masterColumnsRequest) masterColumns.value = response.data
   } catch (error) {
-    if (masterDatabase.value === database && masterTable.value === table) {
-      masterColumnsError.value = getErrorMessage(error, 'Daftar kolom master tidak dapat dimuat.')
+    if (request === masterColumnsRequest) {
+      masterColumnsError.value = getErrorMessage(error, 'Kolom tabel master tidak dapat dimuat.')
     }
+  }
+}
+
+async function loadOperations(): Promise<void> {
+  operationsPending.value = true
+  operationsError.value = ''
+  try {
+    const response = await $fetch<{ data: Operation[] }>('/api/workbench/ops')
+    operations.value = response.data
+  } catch (error) {
+    operationsError.value = getErrorMessage(error, 'Daftar operasi tidak dapat dimuat.')
   } finally {
-    if (masterDatabase.value === database && masterTable.value === table) masterColumnsPending.value = false
+    operationsPending.value = false
   }
 }
 
-function handleSourceDatabaseChange(event: Event) {
+function changeDatabase(event: Event): void {
   const database = (event.target as HTMLSelectElement).value
-  source.setDatabase(database || null)
-  sourceTablesError.value = ''
-  if (database) void loadSourceTables(database)
+  workbench.setSource(database, '')
+  tables.value = []
+  sourceColumns.value = []
+  if (database) void loadTables(database)
 }
 
-function handleSourceTableChange(event: Event) {
+function changeTable(event: Event): void {
   const table = (event.target as HTMLSelectElement).value
-  source.setTable(table || null)
-  sourceColumn.value = ''
-  targetColumn.value = ''
+  workbench.setSource(pipeline.value.source.database, table)
+  void loadSourceColumns(pipeline.value.source.database, table)
 }
 
-function handleMasterDatabaseChange() {
-  masterTables.value = []
-  masterTable.value = ''
-  masterColumns.value = []
-  masterColumn.value = ''
-  masterTablesError.value = ''
-  if (masterDatabase.value) void loadMasterTables(masterDatabase.value)
+function selectStep(index: number): void {
+  selectedStep.value = index
+  page.value = 1
+  statistics.value = null
+  activeColumnMenu.value = ''
+  resetOperationForm()
 }
 
-function handleMasterTableChange() {
-  masterColumn.value = ''
-  if (masterDatabase.value && masterTable.value) {
-    void loadMasterColumns(masterDatabase.value, masterTable.value)
+function showOperations(): void {
+  selectedOperationId.value = ''
+  editingStepIndex.value = null
+  insertAtIndex.value = pipeline.value.steps.length
+  selectedStep.value = pipeline.value.steps.length
+  formInitialParams.value = {}
+}
+
+function resetOperationForm(): void {
+  selectedOperationId.value = ''
+  formInitialParams.value = {}
+  editingStepIndex.value = null
+  insertAtIndex.value = null
+  prefilledColumn.value = ''
+  formKey.value += 1
+}
+
+function chooseOperation(operation: Operation, column = ''): void {
+  selectedOperationId.value = operation.id
+  editingStepIndex.value = null
+  insertAtIndex.value = selectedStep.value
+  formInitialParams.value = {}
+  prefilledColumn.value = column
+  formKey.value += 1
+  activeColumnMenu.value = ''
+}
+
+function editStep(index: number): void {
+  const step = pipeline.value.steps[index]
+  const operation = operations.value.find(({ id }) => id === step.op)
+  if (!operation) return
+  selectedStep.value = index + 1
+  selectedOperationId.value = operation.id
+  editingStepIndex.value = index
+  insertAtIndex.value = null
+  formInitialParams.value = JSON.parse(JSON.stringify(step.params))
+  const masterDatabase = String(step.params.masterDatabase ?? '')
+  const masterTable = String(step.params.masterTable ?? '')
+  if (masterDatabase) void loadTables(masterDatabase)
+  if (masterDatabase && masterTable) void loadMasterColumns(masterDatabase, masterTable)
+  prefilledColumn.value = ''
+  formKey.value += 1
+}
+
+function commitForm(params: Record<string, unknown>): void {
+  if (!selectedOperation.value) return
+  const changed: WorkbenchStep = {
+    id: editingStepIndex.value === null
+      ? `step-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      : pipeline.value.steps[editingStepIndex.value].id,
+    op: selectedOperation.value.id,
+    params,
   }
+  if (editingStepIndex.value === null) {
+    const insertionIndex = Math.max(0, Math.min(insertAtIndex.value ?? pipeline.value.steps.length, pipeline.value.steps.length))
+    pipeline.value.steps.splice(insertionIndex, 0, changed)
+    selectedStep.value = insertionIndex + 1
+  } else {
+    pipeline.value.steps.splice(editingStepIndex.value, 1, changed)
+    selectedStep.value = editingStepIndex.value + 1
+  }
+  page.value = 1
+  statistics.value = null
+  resetOperationForm()
+  workbench.savePipeline()
 }
 
-async function runPreview() {
-  if (!selectedFeature.value || !canPreview.value || previewPending.value) return
-  const featureId = selectedFeature.value.id
-  const parameters = getPreviewParameters()
-  const requestSignature = JSON.stringify({ featureId, parameters })
+function moveStep(index: number, offset: number): void {
+  const target = index + offset
+  if (target < 0 || target >= pipeline.value.steps.length) return
+  const selectedId = selectedStep.value > 0 ? pipeline.value.steps[selectedStep.value - 1]?.id : ''
+  const [step] = pipeline.value.steps.splice(index, 1)
+  pipeline.value.steps.splice(target, 0, step)
+  const selectedIndex = pipeline.value.steps.findIndex(({ id }) => id === selectedId)
+  if (selectedIndex >= 0) selectedStep.value = selectedIndex + 1
+  page.value = 1
+  statistics.value = null
+  workbench.savePipeline()
+}
+
+function deleteStep(index: number): void {
+  pipeline.value.steps.splice(index, 1)
+  if (selectedStep.value > pipeline.value.steps.length) selectedStep.value = pipeline.value.steps.length
+  else if (selectedStep.value === index + 1) selectedStep.value = Math.max(0, index)
+  page.value = 1
+  statistics.value = null
+  resetOperationForm()
+  workbench.savePipeline()
+}
+
+function changePage(nextPage: number): void {
+  if (nextPage < 1 || nextPage > totalPages.value || previewPending.value) return
+  page.value = nextPage
+}
+
+function changeLimit(event: Event): void {
+  const nextLimit = Number((event.target as HTMLSelectElement).value)
+  if (![25, 50, 100].includes(nextLimit)) return
+  limit.value = nextLimit
+  page.value = 1
+}
+
+async function refreshStepSchemas(): Promise<void> {
+  const request = ++schemaRequest
+  const source = pipeline.value.source
+  const steps = pipeline.value.steps
+  if (!source.database || !source.table) {
+    stepStates.value = []
+    return
+  }
+  const statuses: StepState[] = []
+  for (let index = 0; index < steps.length; index += 1) {
+    if (request !== schemaRequest) return
+    stepStates.value = [...statuses, ...steps.slice(index).map(() => ({ status: 'loading' as const }))]
+    try {
+      const response = await $fetch<SchemaResponse>('/api/workbench/schema', {
+        method: 'POST',
+        body: { source, steps: steps.slice(0, index + 1) },
+      })
+      if (request !== schemaRequest) return
+      if (!response.valid) {
+        const message = response.error || 'Skema langkah tidak valid.'
+        statuses.push({ status: 'error', message })
+        for (let rest = index + 1; rest < steps.length; rest += 1) {
+          statuses.push({ status: 'error', message })
+        }
+        break
+      }
+      statuses.push({ status: 'valid', schema: response.schema ?? [] })
+    } catch (error) {
+      if (request !== schemaRequest) return
+      const message = getErrorMessage(error, 'Skema langkah tidak dapat diperiksa.')
+      statuses.push({ status: 'error', message })
+      for (let rest = index + 1; rest < steps.length; rest += 1) {
+        statuses.push({ status: 'error', message })
+      }
+      break
+    }
+  }
+  if (request === schemaRequest) stepStates.value = statuses
+}
+
+async function loadPreview(): Promise<void> {
+  const request = ++previewRequest
+  previewController?.abort()
+  previewController = null
+  if (!sourceReady.value) {
+    previewRows.value = []
+    totalRows.value = 0
+    previewError.value = ''
+    previewPending.value = false
+    return
+  }
+  const controller = new AbortController()
+  previewController = controller
   previewPending.value = true
   previewError.value = ''
-  previewResult.value = null
-  previewSignature.value = ''
-  applyResult.value = null
-  showApplyConfirmation.value = false
-  activeCategory.value = 'fillable'
+  previewRows.value = []
+  const steps = pipeline.value.steps.slice(0, selectedStep.value)
   try {
-    previewResult.value = await $fetch<PreviewResult>('/api/cleansing/preview', {
+    const response = await $fetch<PreviewResponse>('/api/workbench/preview', {
       method: 'POST',
-      body: { featureId, parameters },
+      body: { source: pipeline.value.source, steps, page: page.value, limit: limit.value },
+      signal: controller.signal,
     })
-    previewSignature.value = requestSignature
+    if (request !== previewRequest) return
+    previewRows.value = response.rows
+    totalRows.value = Number(response.totalRows)
+    page.value = response.page
   } catch (error) {
-    previewError.value = getErrorMessage(error, 'Pratinjau tidak dapat dijalankan.')
+    if (request !== previewRequest || controller.signal.aborted) return
+    previewError.value = getErrorMessage(error, 'Pratinjau tidak dapat dimuat.')
   } finally {
-    previewPending.value = false
+    if (request === previewRequest) previewPending.value = false
   }
 }
 
-function openApplyConfirmation() {
-  if (!canApply.value || !sourceTable.value) return
-  resultTableName.value = `${sourceTable.value}_cleaned`
-  saveOriginal.value = true
-  applyError.value = ''
-  showApplyConfirmation.value = true
+async function loadStatistics(): Promise<void> {
+  if (selectedStep.value < 1) return
+  const request = ++statisticsRequest
+  statistics.value = null
+  statisticsError.value = ''
+  try {
+    const response = await $fetch<StatisticsResponse>('/api/workbench/stats', {
+      method: 'POST',
+      body: {
+        source: pipeline.value.source,
+        steps: pipeline.value.steps.slice(0, selectedStep.value),
+        step: selectedStep.value,
+        touchedColumns: touchedColumnsForStats.value,
+      },
+    })
+    if (request === statisticsRequest) statistics.value = response
+  } catch (error) {
+    if (request === statisticsRequest) statisticsError.value = getErrorMessage(error, 'Statistik tidak dapat dihitung.')
+  }
 }
 
-async function applyToNewTable() {
-  if (!selectedFeature.value || !canApply.value || !resultNameValid.value) return
-  const featureId = selectedFeature.value.id
-  const parameters = getPreviewParameters()
-  if (JSON.stringify({ featureId, parameters }) !== previewSignature.value) return
+async function openSql(): Promise<void> {
+  showSqlPanel.value = true
+  sqlResult.value = null
+  sqlError.value = ''
+  sqlPending.value = true
+  try {
+    sqlResult.value = await $fetch<SqlResponse>('/api/workbench/sql', {
+      method: 'POST',
+      body: { source: pipeline.value.source, steps: pipeline.value.steps.slice(0, selectedStep.value) },
+    })
+  } catch (error) {
+    sqlError.value = getErrorMessage(error, 'SQL tidak dapat dimuat.')
+  } finally {
+    sqlPending.value = false
+  }
+}
 
+async function copySql(): Promise<void> {
+  if (!sqlResult.value) return
+  copyError.value = ''
+  try {
+    await navigator.clipboard.writeText(sqlResult.value.sql)
+    sqlCopied.value = true
+    window.setTimeout(() => { sqlCopied.value = false }, 1800)
+  } catch (error) {
+    copyError.value = getErrorMessage(error, 'SQL tidak dapat disalin dari peramban ini.')
+  }
+}
+
+async function copyParameters(): Promise<void> {
+  if (!sqlResult.value) return
+  copyError.value = ''
+  try {
+    await navigator.clipboard.writeText(formatJson(sqlResult.value.params))
+    parametersCopied.value = true
+    window.setTimeout(() => { parametersCopied.value = false }, 1800)
+  } catch (error) {
+    copyError.value = getErrorMessage(error, 'Parameter tidak dapat disalin dari peramban ini.')
+  }
+}
+
+function operationMatchesColumn(operation: Operation, column: Column): boolean {
+  const columnParams = operation.params.filter(({ type }) => type === 'column')
+  if (!columnParams.length) return false
+  return columnParams.some((parameter) => {
+    const textOnly = `${parameter.label} ${parameter.description}`.toLowerCase().includes('teks')
+      || operation.id === 'trim_text'
+      || operation.id === 'replace_values'
+      || (operation.id === 'fill_from_master' && /Column$/.test(parameter.key))
+    return !textOnly || isTextColumn(column)
+  })
+}
+
+function columnOperations(column: Column): Operation[] {
+  return operations.value.filter((operation) => operationMatchesColumn(operation, column))
+}
+
+function toggleColumnMenu(column: string): void {
+  activeColumnMenu.value = activeColumnMenu.value === column ? '' : column
+}
+
+function isTextColumn(column: Column): boolean {
+  const type = column.type.replace(/Nullable\s*\(/g, '').replace(/LowCardinality\s*\(/g, '')
+  return /^\s*String\s*\)*\s*$/.test(type)
+}
+
+function openSaveDialog(): void {
+  const sourceName = pipeline.value.source.table
+  resultTableName.value = `${sourceName}_cleaned`.slice(0, 64)
+  resultEngine.value = 'MergeTree'
+  orderBy.value = []
+  saveOriginal.value = false
+  applyError.value = ''
+  applyResult.value = null
+  showSaveDialog.value = true
+}
+
+function selectOrderBy(column: string): void {
+  orderBy.value = [column]
+}
+
+async function applyPipeline(): Promise<void> {
+  if (!canApply.value) return
   applying.value = true
   applyError.value = ''
   try {
-    applyResult.value = await $fetch<ApplyResult>('/api/cleansing/apply', {
+    const response = await $fetch<ApplyResponse>('/api/workbench/apply', {
       method: 'POST',
       body: {
-        featureId,
-        parameters,
+        source: pipeline.value.source,
+        steps: pipeline.value.steps,
         resultTableName: resultTableName.value,
+        engine: resultEngine.value,
+        orderBy: orderBy.value,
         saveOriginal: saveOriginal.value,
       },
     })
-    showApplyConfirmation.value = false
+    applyResult.value = response
   } catch (error) {
-    applyError.value = getErrorMessage(error, 'Penerapan gagal. Tabel sumber tidak diubah.')
+    applyError.value = getErrorMessage(error, 'Tabel hasil tidak dapat dibuat.')
   } finally {
     applying.value = false
   }
 }
 
-async function viewResultTable() {
+async function viewResultTable(): Promise<void> {
   if (!applyResult.value) return
-  source.setDatabase(applyResult.value.database)
-  source.setTable(applyResult.value.tableName)
+  selectedSource.setDatabase(applyResult.value.database)
+  selectedSource.setTable(applyResult.value.table)
   await navigateTo('/sumber-data')
 }
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat('id-ID').format(value)
+function closePanels(): void {
+  if (!applying.value) {
+    showSqlPanel.value = false
+    closeSaveDialog()
+  }
 }
 
-function formatDuration(value: number): string {
-  if (value < 1000) return `${formatNumber(value)} ms`
-  return `${new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(value / 1000)} detik`
+function closeSaveDialog(): void {
+  if (applying.value) return
+  showSaveDialog.value = false
 }
 
-function displayValue(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (value === '') return '(kosong)'
-  if (typeof value === 'object') return JSON.stringify(value) ?? String(value)
-  return String(value)
+function handleDialogKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closePanels()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const dialog = event.currentTarget as HTMLElement
+  const focusable = [...dialog.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => element.getAttribute('aria-hidden') !== 'true')
+  if (focusable.length === 0) {
+    event.preventDefault()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
-watch([sourceDatabase, sourceTable], ([database, table]) => {
-  sourceColumns.value = []
-  sourceColumnsError.value = ''
-  sourceColumn.value = ''
-  targetColumn.value = ''
-  if (database && table) void loadSourceColumns(database, table)
+watch([showSqlPanel, showSaveDialog], async ([sqlOpen, saveOpen], [wasSqlOpen, wasSaveOpen]) => {
+  if (sqlOpen || saveOpen) {
+    if (!wasSqlOpen && !wasSaveOpen) {
+      returnFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    }
+    await nextTick()
+    const dialog = document.querySelector<HTMLElement>(saveOpen ? '.wb-save-dialog' : '.wb-sql-dialog')
+    const initialFocus = dialog?.querySelector<HTMLElement>('button:not(:disabled)')
+    ;(initialFocus ?? dialog)?.focus()
+  } else if (wasSqlOpen || wasSaveOpen) {
+    returnFocusElement?.focus()
+    returnFocusElement = null
+  }
 })
 
-watch(selectedFeatureId, () => {
-  previewResult.value = null
-  previewSignature.value = ''
-  previewError.value = ''
-  applyResult.value = null
-  showApplyConfirmation.value = false
+watch(
+  () => `${pipeline.value.source.database}\u0000${pipeline.value.source.table}\u0000${JSON.stringify(pipeline.value.steps)}`,
+  () => {
+    page.value = 1
+    statistics.value = null
+    workbench.savePipeline()
+    void refreshStepSchemas()
+    if (pipeline.value.source.database && pipeline.value.source.table) {
+      void loadSourceColumns(pipeline.value.source.database, pipeline.value.source.table)
+    }
+    void loadPreview()
+  },
+)
+
+watch([selectedStep, page, limit], () => {
+  statistics.value = null
+  void loadPreview()
 })
+
+watch(
+  () => pipeline.value.source.database,
+  (database) => {
+    if (database) void loadTables(database)
+    else tables.value = []
+  },
+)
 
 onMounted(async () => {
-  await Promise.all([loadFeatures(), loadDatabases()])
-  if (sourceDatabase.value) await loadSourceTables(sourceDatabase.value)
-  if (sourceDatabase.value && sourceTable.value) {
-    await loadSourceColumns(sourceDatabase.value, sourceTable.value)
+  workbench.initialize()
+  await Promise.all([loadDatabases(), loadOperations()])
+  if (pipeline.value.source.database) await loadTables(pipeline.value.source.database)
+  if (pipeline.value.source.database && pipeline.value.source.table) {
+    await loadSourceColumns(pipeline.value.source.database, pipeline.value.source.table)
+    void refreshStepSchemas()
+    void loadPreview()
   }
 })
 </script>
 
 <style scoped>
-.cleansing-card,
-.result-card,
-.apply-confirmation,
-.apply-result {
-  min-width: 0;
-  margin: 0;
-}
-
-.cleansing-card {
-  align-self: start;
-}
-
-.cleansing-form {
+.workbench-page {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
-.field-group {
-  display: grid;
-  align-content: start;
-  gap: 7px;
+.workbench-page > *,
+.wb-grid > * {
   min-width: 0;
 }
 
-.field-group label {
-  color: #526479;
-  font-size: 13px;
-  font-weight: 650;
+.wb-source {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
 }
 
-.field-group select {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 11px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 8px;
-  color: var(--warna-teks);
-  background: #fff;
-  font: inherit;
-  font-size: 14px;
+.wb-source-title {
+  grid-column: 1 / -1;
 }
 
-.field-group input[type='text'] {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 11px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 8px;
-  color: var(--warna-teks);
-  background: #fff;
-  font: inherit;
-  font-size: 14px;
-}
-
-.field-group select:focus-visible,
-.field-group input[type='text']:focus-visible,
-.preview-button:focus-visible,
-.inline-retry:focus-visible,
-.apply-open-button:focus-visible,
-.cancel-button:focus-visible {
-  outline: 2px solid var(--warna-utama);
-  outline-offset: 2px;
-}
-
-.field-group select:disabled {
-  color: #8b9aac;
-  background: #f5f8fa;
-}
-
-.field-message,
-.feature-description,
-.safety-note,
-.preview-error {
+.wb-source-title .card-title {
   margin: 0;
+}
+
+.wb-source-title p {
+  margin: 4px 0 0;
   color: var(--warna-redup);
   font-size: 13px;
 }
 
-.field-error,
-.preview-error {
-  color: #a64b42;
+.wb-source-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
 }
 
-.inline-retry {
-  margin-left: 5px;
-  padding: 0;
-  border: 0;
-  color: #355f28;
-  background: transparent;
-  font-weight: 700;
-  text-decoration: underline;
-  cursor: pointer;
+.wb-source-field label,
+.wb-save-form > label {
+  color: #40566d;
+  font-size: 13px;
+  font-weight: 650;
 }
 
-.feature-description {
-  grid-column: 1 / -1;
-  margin-top: -6px;
-}
-
-.safety-note {
-  margin-top: 18px;
-  padding: 12px 14px;
-  border-left: 3px solid var(--warna-pistachio);
-  border-radius: 4px;
-  color: #526479;
-  background: #f7f9ed;
-}
-
-.preview-button {
-  min-height: 44px;
-  margin-top: 14px;
-  padding: 9px 18px;
-  border: 1px solid var(--warna-utama);
-  border-radius: 8px;
-  color: #fff;
-  background: var(--warna-utama);
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.preview-button:hover:not(:disabled) {
-  filter: brightness(0.96);
-}
-
-.preview-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.apply-open-button,
-.cancel-button {
-  min-height: 44px;
-  margin: 14px 0 0 8px;
-  padding: 9px 16px;
+.wb-source select,
+.wb-save-form > input,
+.wb-save-form > select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
   border: 1px solid var(--warna-garis);
   border-radius: 8px;
-  color: #355875;
-  background: var(--warna-biru-muda);
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+}
+
+.wb-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 2fr) minmax(250px, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.wb-steps-card,
+.wb-data-card,
+.wb-operations-card {
+  min-width: 0;
+  margin: 0;
+}
+
+.wb-card-heading,
+.wb-data-actions,
+.wb-pagination,
+.wb-pagination > div,
+.wb-dialog-heading,
+.wb-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wb-card-heading {
+  margin-bottom: 14px;
+}
+
+.wb-card-heading .page-kicker,
+.wb-data-title .page-kicker {
+  margin-bottom: 3px;
+}
+
+.wb-card-heading .card-title,
+.wb-data-title .card-title {
+  margin: 0;
+}
+
+.wb-button,
+.wb-icon-button,
+.wb-link-button,
+.wb-sql-link {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: #375875;
+  background: #fff;
+  font: inherit;
   cursor: pointer;
 }
 
-.apply-open-button:disabled,
-.cancel-button:disabled {
+.wb-button:disabled,
+.wb-icon-button:disabled,
+.wb-link-button:disabled,
+.wb-sql-link:disabled {
+  color: #8998a8;
+  background: #f5f8fa;
   cursor: not-allowed;
-  opacity: 0.55;
 }
 
-.apply-confirmation {
-  position: fixed;
-  inset: 50% auto auto 50%;
-  z-index: 11;
-  width: min(720px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  transform: translate(-50%, -50%);
-  border-top: 3px solid var(--warna-pistachio);
-  box-shadow: 0 18px 60px rgb(26 43 60 / 24%);
+.wb-small {
+  min-height: 34px;
+  padding: 5px 8px;
+  font-size: 12px;
 }
 
-.confirmation-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  background: rgb(26 43 60 / 48%);
+.wb-primary {
+  border-color: var(--warna-utama);
+  color: #fff;
+  background: var(--warna-utama);
+  font-weight: 700;
 }
 
-.save-original-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin-top: 14px;
-  color: #526479;
+.wb-save-open {
+  min-height: 42px;
+  white-space: normal;
+}
+
+.wb-message,
+.wb-inline-status {
+  margin: 8px 0;
+  color: var(--warna-redup);
   font-size: 13px;
-}
-
-.save-original-option input {
-  width: 17px;
-  height: 17px;
-  margin: 2px 0 0;
-  accent-color: var(--warna-utama);
-}
-
-.save-original-option code,
-.apply-summary code {
   overflow-wrap: anywhere;
 }
 
-.apply-summary {
-  display: grid;
-  gap: 10px;
-  margin: 16px 0 4px;
+.wb-error,
+.wb-danger-text {
+  color: #963c35;
 }
 
-.apply-summary div {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
-  gap: 12px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid #e8f0f7;
-}
-
-.apply-summary dt {
-  color: var(--warna-redup);
-  font-size: 13px;
-}
-
-.apply-summary dd {
+.wb-warning {
   margin: 0;
-  color: #263a4e;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 9px;
+  border: 1px solid #ecdca4;
+  border-radius: 8px;
+  color: #74591c;
+  background: #fff9e6;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
-.apply-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.apply-actions .cancel-button {
-  margin-top: 14px;
-}
-
-.apply-result {
-  align-self: start;
-  border-top: 3px solid var(--warna-pistachio);
-}
-
-.preview-error {
-  margin-top: 12px;
-}
-
-.statistics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 14px 0;
-}
-
-.category-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 14px 0 10px;
-  border-bottom: 1px solid var(--warna-garis);
-}
-
-.category-tabs button {
-  display: inline-flex;
-  min-height: 42px;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: -1px;
-  padding: 8px 11px;
+.wb-link-button {
+  min-height: 0;
+  padding: 0;
   border: 0;
-  border-bottom: 2px solid transparent;
-  color: #637287;
+  color: var(--warna-utama);
   background: transparent;
-  font: inherit;
   font-size: 13px;
-  font-weight: 650;
+}
+
+.wb-step-list {
+  display: grid;
+  gap: 9px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-step-row {
+  min-width: 0;
+}
+
+.wb-step {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  color: var(--warna-teks);
+  background: #fff;
+  text-align: left;
   cursor: pointer;
 }
 
-.category-tabs button span {
-  min-width: 22px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: #526479;
-  background: var(--warna-biru-muda);
-  font-size: 11px;
-  text-align: center;
+.wb-step-selected {
+  border-color: var(--warna-utama);
+  box-shadow: 0 0 0 2px rgb(87 152 215 / 12%);
 }
 
-.category-tabs button.category-tab--active {
-  border-bottom-color: var(--warna-utama);
-  color: var(--warna-utama);
-}
-
-.category-tabs button:focus-visible {
-  outline: 2px solid var(--warna-utama);
-  outline-offset: -2px;
-}
-
-.statistic-card {
+.wb-step-number {
   display: grid;
-  gap: 6px;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid #e8f0f7;
-  border-radius: 10px;
-  background: #f7fbfe;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  color: #375875;
+  background: var(--warna-biru-muda);
+  font-size: 12px;
+  font-weight: 750;
 }
 
-.statistic-card span {
+.wb-step-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wb-step-copy strong,
+.wb-step-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-step-copy strong {
+  font-size: 12px;
+}
+
+.wb-step-copy small {
+  color: var(--warna-redup);
+  font-size: 11px;
+}
+
+.wb-status {
+  padding: 3px 6px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 999px;
+  color: #5a6c7d;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.wb-status-valid {
+  border-color: #c9dec1;
+  color: #315d27;
+  background: #edf5e9;
+}
+
+.wb-status-error {
+  border-color: #f0c8c4;
+  color: #8a352e;
+  background: #fdf0ee;
+}
+
+.wb-status-loading {
+  color: #526479;
+  background: #f2f5f8;
+}
+
+.wb-step-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 0 35px;
+}
+
+.wb-icon-button {
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.wb-step-error {
+  margin: 7px 0 0 35px;
+  color: #963c35;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wb-sql-link {
+  width: 100%;
+  margin-top: 15px;
+  color: var(--warna-utama);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-data-card {
+  overflow: hidden;
+}
+
+.wb-data-heading {
+  flex-wrap: wrap;
+}
+
+.wb-limit-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--warna-redup);
   font-size: 12px;
 }
 
-.statistic-card strong {
-  color: #263a4e;
-  font-size: 21px;
-  font-weight: 700;
+.wb-limit-field select {
+  min-height: 36px;
+  padding: 5px 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
 }
 
-.statistic-warning {
-  border-color: #e7e8ce;
-  background: #fbfbed;
+.wb-data-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 
-.preview-table-viewport {
+.wb-inline-status {
+  margin: 0;
+}
+
+.wb-table-viewport {
+  width: 100%;
   max-width: 100%;
-  margin-top: 12px;
+  max-height: 560px;
   overflow: auto;
   border: 1px solid var(--warna-garis);
   border-radius: 10px;
+  overscroll-behavior: contain;
 }
 
-.preview-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
+.wb-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
 }
 
-.preview-table th,
-.preview-table td {
+.wb-table th,
+.wb-table td {
+  max-width: 280px;
   min-width: 130px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e8f0f7;
+  padding: 9px 10px;
+  border-right: 1px solid #e8eff5;
+  border-bottom: 1px solid #e8eff5;
   text-align: left;
   vertical-align: top;
 }
 
-.preview-table th {
+.wb-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   color: #526479;
-  background: #f4f8fb;
-  font-weight: 700;
+  background: #f5f8fa;
+  font-weight: 650;
 }
 
-.preview-table td {
-  max-width: 320px;
+.wb-table th:last-child,
+.wb-table td:last-child {
+  border-right: 0;
+}
+
+.wb-column-heading {
+  position: relative;
+  display: grid;
+  gap: 4px;
+}
+
+.wb-column-menu-button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-column-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-column-heading > small {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  color: #8190a0;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-column-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 4;
+  display: grid;
+  min-width: 190px;
+  max-width: min(260px, 80vw);
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: var(--bayangan-kartu);
+}
+
+.wb-column-menu strong,
+.wb-column-menu button,
+.wb-column-menu p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.wb-column-menu button {
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #375875;
+  background: #f5f8fa;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-cell {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-cell-null {
+  color: #9c3e36;
+  font-style: italic;
+}
+
+.wb-cell-empty {
+  color: #718196;
+  font-style: italic;
+}
+
+.wb-cell-changed {
+  padding: 1px 4px;
+  border-radius: 4px;
+  outline: 1px solid #e3c85b;
+  background: #fff4bf;
+}
+
+.wb-pagination {
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-pagination > div {
+  flex-wrap: wrap;
+}
+
+.wb-statistics {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.wb-statistics h3,
+.wb-statistics p {
+  margin: 0;
+}
+
+.wb-statistics h3 {
+  font-size: 14px;
+}
+
+.wb-statistics p,
+.wb-stat-column span {
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-stat-column {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-top: 8px;
+  border-top: 1px solid #e3ebf2;
+}
+
+.wb-stat-column strong {
+  width: 100%;
+  font-size: 12px;
+}
+
+.wb-operation-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-operation-list button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 9px;
+  color: var(--warna-teks);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-operation-list button:disabled {
+  cursor: not-allowed;
+}
+
+.wb-operation-list strong {
+  font-size: 13px;
+}
+
+.wb-operation-list span {
+  color: var(--warna-redup);
+  font-size: 11px;
+}
+
+.wb-operation-name {
+  margin: 0 0 12px;
+  color: #263a4e;
+  font-size: 15px;
+}
+
+.wb-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  background: rgb(21 38 55 / 38%);
+}
+
+.wb-dialog {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  z-index: 9;
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+}
+
+.wb-dialog-heading .card-title {
+  margin: 0;
+}
+
+.wb-sql-dialog h3,
+.wb-save-form h3 {
+  margin: 16px 0 7px;
+  color: #30455b;
+  font-size: 14px;
+}
+
+.wb-code {
+  max-height: 300px;
+  overflow: auto;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #f7fafc;
+  font-size: 12px;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
-  .cleansing-form {
-    grid-template-columns: 1fr;
-  }
+.wb-save-form {
+  display: grid;
+  gap: 10px;
+}
 
-  .feature-description {
-    grid-column: auto;
-  }
+.wb-safety-note {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #d5e5c4;
+  border-radius: 8px;
+  color: #426132;
+  background: #f1f7e9;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 
-  .statistics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.wb-order-fields {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 9px;
+}
+
+.wb-order-fields legend {
+  padding: 0 5px;
+  color: #40566d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wb-order-fields > p {
+  margin: 0;
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-order-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  color: #526479;
+  font-size: 12px;
+}
+
+.wb-order-option input,
+.wb-save-original input {
+  width: 16px;
+  min-height: 16px;
+  margin: 3px 0 0;
+}
+
+.wb-order-option > span {
+  overflow-wrap: anywhere;
+}
+
+.wb-nullable-note {
+  grid-column: 2;
+  color: #8a6a22;
+}
+
+.wb-save-original {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #40566d;
+  font-size: 13px;
+}
+
+.wb-summary {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.wb-summary > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.3fr);
+  gap: 8px;
+}
+
+.wb-summary dt {
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-summary dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.wb-summary-steps,
+.wb-result-columns {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+  color: #526479;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wb-result-columns {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  padding: 0;
+  list-style: none;
+}
+
+.wb-dialog-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 6px;
 }
 
 @media (max-width: 1100px) {
-  .cleansing-form {
+  .wb-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wb-operations-card {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .wb-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .wb-operations-card {
+    grid-column: auto;
+  }
+
+  .wb-source {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .statistics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .wb-source-title {
+    grid-column: 1;
+  }
+
+  .wb-save-open {
+    width: 100%;
+  }
+
+  .wb-dialog {
+    width: calc(100vw - 24px);
+    max-height: 90vh;
+    padding: 16px;
+  }
+
+  .wb-table th,
+  .wb-table td {
+    max-width: 220px;
+    min-width: 120px;
   }
 }
 
 @media (max-width: 420px) {
-  .apply-summary div {
-    grid-template-columns: 1fr;
-    gap: 3px;
+  .wb-card-heading,
+  .wb-data-heading,
+  .wb-pagination,
+  .wb-dialog-heading {
+    align-items: flex-start;
   }
 
-  .statistics-grid {
+  .wb-step {
+    grid-template-columns: 26px minmax(0, 1fr);
+  }
+
+  .wb-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .wb-summary > div {
     grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .wb-pagination {
+    flex-direction: column;
   }
 }
 </style>
