@@ -469,7 +469,9 @@ a {
   }
 
   .sidebar {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 4;
     width: auto;
     min-height: auto;
     padding: 12px 18px;
@@ -494,15 +496,21 @@ a {
 
   .side-nav {
     display: flex;
-    flex-wrap: wrap;
+    min-width: 0;
+    flex-wrap: nowrap;
     gap: 5px;
     margin-top: 12px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
   }
 
   .side-nav a {
+    flex: 0 0 auto;
     min-height: 44px;
     padding: 0 12px;
     font-size: 14px;
+    white-space: nowrap;
   }
 
   .side-nav svg {
@@ -562,6 +570,12 @@ a {
   .wadah {
     padding-right: 15px;
     padding-left: 15px;
+  }
+
+  .side-nav a {
+    min-height: 40px;
+    padding: 0 9px;
+    font-size: 12px;
   }
 
   .kartu {
