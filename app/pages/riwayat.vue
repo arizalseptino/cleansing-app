@@ -1,10 +1,28 @@
 <template>
-  <div>
+  <div class="bento">
+    <header class="bento-heading">
     <p class="page-kicker">Ruang kerja</p>
     <h1 class="page-title">Riwayat cleansing</h1>
     <p class="page-description">Lihat ringkasan penerapan cleansing yang pernah dijalankan.</p>
+    </header>
 
-    <section class="kartu history-card" aria-label="Riwayat penerapan cleansing">
+    <article class="kartu history-stat span-4" aria-live="polite">
+      <span>Penerapan dimuat</span>
+      <strong v-if="!pending && !errorMessage">{{ formatNumber(entries.length) }}</strong>
+      <span v-else>{{ pending ? 'Memuat...' : 'Data tidak tersedia' }}</span>
+    </article>
+    <article class="kartu history-stat span-4" aria-live="polite">
+      <span>Sukses pada halaman ini</span>
+      <strong v-if="!pending && !errorMessage">{{ formatNumber(successCount) }}</strong>
+      <span v-else>{{ pending ? 'Memuat...' : 'Data tidak tersedia' }}</span>
+    </article>
+    <article class="kartu history-stat span-4" aria-live="polite">
+      <span>Gagal pada halaman ini</span>
+      <strong v-if="!pending && !errorMessage">{{ formatNumber(failedCount) }}</strong>
+      <span v-else>{{ pending ? 'Memuat...' : 'Data tidak tersedia' }}</span>
+    </article>
+
+    <section class="kartu history-card span-12" aria-label="Riwayat penerapan cleansing">
       <div class="history-heading">
         <h2 class="card-title">Penerapan terbaru</h2>
         <button class="history-refresh" type="button" :disabled="pending" @click="loadHistory(page)">
@@ -146,6 +164,8 @@ const expandedEntryId = ref<string | null>(null)
 let requestId = 0
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
+const successCount = computed(() => entries.value.filter(({ status }) => status === 'sukses').length)
+const failedCount = computed(() => entries.value.filter(({ status }) => status !== 'sukses').length)
 
 function getErrorMessage(error: unknown, fallback = 'Riwayat cleansing tidak dapat dimuat.'): string {
   if (error && typeof error === 'object') {
@@ -235,8 +255,26 @@ onMounted(() => {
 
 <style scoped>
 .history-card {
-  max-width: 1080px;
-  margin-top: 20px;
+  min-width: 0;
+  margin: 0;
+}
+
+.history-stat {
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.history-stat > span {
+  color: var(--warna-redup);
+  font-size: 13px;
+}
+
+.history-stat strong {
+  color: #263a4e;
+  font-size: clamp(24px, 3vw, 36px);
+  line-height: 1.15;
 }
 
 .history-heading,

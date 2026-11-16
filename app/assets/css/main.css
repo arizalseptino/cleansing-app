@@ -222,9 +222,51 @@ a {
 }
 
 .wadah {
-  width: min(1080px, 100%);
+  width: min(1280px, 100%);
   margin: 0 auto;
   padding: 30px 32px 38px;
+}
+
+.bento {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 16px;
+}
+
+.bento > * {
+  min-width: 0;
+}
+
+.span-4 {
+  grid-column: span 4;
+}
+
+.span-5 {
+  grid-column: span 5;
+}
+
+.span-7 {
+  grid-column: span 7;
+}
+
+.span-8 {
+  grid-column: span 8;
+}
+
+.span-12 {
+  grid-column: 1 / -1;
+}
+
+.row-2 {
+  grid-row: span 2;
+}
+
+.bento-heading {
+  min-width: 0;
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
 }
 
 .page-kicker {
@@ -253,19 +295,11 @@ a {
   line-height: 1.6;
 }
 
-.dashboard-grid {
-  display: grid;
-  max-width: 920px;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 14px;
-  margin-top: 20px;
-}
-
 .kartu {
   min-width: 0;
   padding: 18px;
   border: 1px solid var(--warna-garis);
-  border-radius: 15px;
+  border-radius: 18px;
   background: var(--warna-kartu);
   box-shadow: var(--bayangan-kartu);
 }
@@ -379,6 +413,28 @@ a {
   }
 }
 
+@media (max-width: 1100px) {
+  .bento {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .span-4,
+  .span-5,
+  .span-7,
+  .span-8 {
+    grid-column: span 1;
+  }
+
+  .span-12,
+  .bento-heading {
+    grid-column: 1 / -1;
+  }
+
+  .row-2 {
+    grid-row: auto;
+  }
+}
+
 @media (max-width: 960px) {
   .sidebar {
     width: 200px;
@@ -395,13 +451,23 @@ a {
   .wadah {
     padding: 30px 24px 40px;
   }
-
-  .dashboard-grid {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  }
 }
 
 @media (max-width: 720px) {
+  .bento {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .span-4,
+  .span-5,
+  .span-7,
+  .span-8,
+  .span-12,
+  .bento-heading {
+    grid-column: 1;
+  }
+
   .sidebar {
     position: static;
     width: auto;
@@ -428,6 +494,7 @@ a {
 
   .side-nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 5px;
     margin-top: 12px;
   }
@@ -462,12 +529,6 @@ a {
 
   .wadah {
     padding: 24px 20px 32px;
-  }
-
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
-    margin-top: 20px;
   }
 
   .connection-card {

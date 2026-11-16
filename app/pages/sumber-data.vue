@@ -1,12 +1,12 @@
 <template>
-  <div>
+  <div class="bento">
+    <header class="bento-heading">
     <p class="page-kicker">Ruang kerja</p>
     <h1 class="page-title">Sumber data</h1>
     <p class="page-description">Pilih database dan tabel ClickHouse yang ingin Anda bersihkan.</p>
+    </header>
 
-    <!-- Memisahkan kontrol pilihan dari metadata tabel yang dipilih. -->
-    <section class="dashboard-grid" aria-label="Pemilihan database dan ringkasan tabel">
-      <article class="kartu source-card">
+      <article class="kartu source-card span-4" aria-label="Pilih sumber">
         <h2 class="card-title">Pilih sumber</h2>
 
         <label class="source-field" for="database-select">Database</label>
@@ -70,7 +70,7 @@
         </button>
       </article>
 
-      <article class="kartu source-card" aria-live="polite">
+      <article class="kartu source-card span-4" aria-live="polite">
         <h2 class="card-title">Ringkasan tabel</h2>
         <template v-if="selectedTable">
           <dl class="table-summary">
@@ -83,8 +83,14 @@
               <dd>{{ selectedEngine }}</dd>
             </div>
           </dl>
+        </template>
+        <p v-else class="source-message">Pilih tabel untuk melihat ringkasannya.</p>
+      </article>
 
-          <h3 class="columns-title">Kolom</h3>
+      <article class="kartu source-card columns-card span-4" aria-live="polite">
+        <h2 class="card-title">Daftar kolom</h2>
+        <p v-if="!selectedTable" class="source-message">Pilih tabel untuk melihat daftar kolomnya.</p>
+        <template v-else>
           <p v-if="columnsPending" class="source-message" role="status">Memuat daftar kolom...</p>
           <p v-else-if="columnsError" class="source-message source-error" role="alert">
             Gagal memuat kolom: {{ columnsError }}
@@ -107,20 +113,21 @@
             Coba lagi
           </button>
         </template>
-        <p v-else class="source-message">Pilih tabel untuk melihat engine dan daftar kolomnya.</p>
       </article>
-    </section>
 
-    <section v-if="selectedDatabase && selectedTable" class="kartu rows-card" aria-label="Isi tabel">
+    <section class="kartu rows-card span-12" aria-label="Isi tabel">
       <div class="rows-heading">
         <div>
           <p class="page-kicker">Pratinjau data</p>
           <h2 class="card-title">Isi tabel</h2>
         </div>
-        <code>{{ selectedTable }}</code>
+        <code v-if="selectedTable">{{ selectedTable }}</code>
       </div>
 
-      <p v-if="rowsPending" class="source-message" role="status">Memuat isi tabel...</p>
+      <p v-if="!selectedDatabase || !selectedTable" class="source-message">
+        Pilih database dan tabel untuk melihat isinya.
+      </p>
+      <p v-else-if="rowsPending" class="source-message" role="status">Memuat isi tabel...</p>
       <p v-else-if="rowsError" class="source-message source-error" role="alert">
         Gagal memuat isi tabel: {{ rowsError }}
       </p>
@@ -464,8 +471,8 @@ onMounted(loadDatabases)
 
 <style scoped>
 .rows-card {
-  max-width: 920px;
-  margin-top: 14px;
+  min-width: 0;
+  margin: 0;
 }
 
 .rows-heading,

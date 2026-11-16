@@ -1,12 +1,14 @@
 <template>
-  <div>
+  <div class="bento">
+    <header class="bento-heading">
     <p class="page-kicker">Ruang kerja</p>
     <h1 class="page-title">Cleansing data</h1>
     <p class="page-description">
       Pilih fitur dan kolom untuk melihat perkiraan hasil cleansing pada data ClickHouse.
     </p>
+    </header>
 
-    <section class="kartu cleansing-card" aria-label="Pengaturan pratinjau cleansing">
+    <section class="kartu cleansing-card span-5 row-2" aria-label="Pengaturan pratinjau cleansing">
       <h2 class="card-title">Atur pratinjau</h2>
       <div class="cleansing-form">
         <div class="field-group">
@@ -232,9 +234,128 @@
       </p>
     </section>
 
+    <section class="kartu result-card span-7" aria-live="polite">
+      <h2 class="card-title">Statistik pratinjau</h2>
+      <div v-if="previewResult" class="statistics-grid">
+        <article class="statistic-card">
+          <span>Jumlah baris sumber</span>
+          <strong>{{ formatNumber(previewResult.statistics.sourceRows) }}</strong>
+        </article>
+        <article class="statistic-card">
+          <span>Target kosong</span>
+          <strong>{{ formatNumber(previewResult.statistics.targetEmptyRows) }}</strong>
+        </article>
+        <article class="statistic-card">
+          <span>Bisa diisi</span>
+          <strong>{{ formatNumber(previewResult.statistics.fillableRows) }}</strong>
+        </article>
+        <article class="statistic-card statistic-warning">
+          <span>Ambigu</span>
+          <strong>{{ formatNumber(previewResult.statistics.ambiguousRows) }}</strong>
+        </article>
+        <article class="statistic-card">
+          <span>Tetap kosong</span>
+          <strong>{{ formatNumber(previewResult.statistics.remainingEmptyRows) }}</strong>
+        </article>
+      </div>
+      <p v-else class="field-message">Jalankan pratinjau untuk melihat statistik hasil.</p>
+    </section>
+
+    <section v-if="applyResult" class="kartu apply-result span-7" aria-live="polite">
+      <h2 class="card-title">Penerapan berhasil</h2>
+      <p class="field-message">Tabel sumber tetap tidak diubah. Tabel hasil baru sudah selesai diverifikasi.</p>
+      <p v-if="applyResult.historyWarning" class="field-message field-error" role="status">
+        {{ applyResult.historyWarning }}
+      </p>
+      <dl class="apply-summary">
+        <div>
+          <dt>Tabel hasil</dt>
+          <dd><code>{{ applyResult.database }}.{{ applyResult.tableName }}</code></dd>
+        </div>
+        <div>
+          <dt>Jumlah baris</dt>
+          <dd>{{ formatNumber(applyResult.rowCount) }}</dd>
+        </div>
+        <div>
+          <dt>Baris terisi</dt>
+          <dd>{{ formatNumber(applyResult.filledRows) }}</dd>
+        </div>
+        <div>
+          <dt>Baris ambigu dibiarkan kosong</dt>
+          <dd>{{ formatNumber(applyResult.ambiguousRowsLeftEmpty) }}</dd>
+        </div>
+        <div>
+          <dt>Durasi</dt>
+          <dd>{{ formatDuration(applyResult.durationMs) }}</dd>
+        </div>
+      </dl>
+      <button class="preview-button" type="button" @click="viewResultTable">
+        Lihat isi tabel hasil
+      </button>
+    </section>
+
+    <section class="kartu result-card span-7" aria-live="polite">
+      <h2 class="card-title">Contoh hasil</h2>
+      <template v-if="previewResult">
+        <p v-if="!previewResult.orderedBySortingKey" class="field-message" role="status">
+          Tabel sumber tidak memiliki sorting key; urutan contoh baris tidak dijamin.
+        </p>
+        <p v-else class="field-message" role="status">
+          Contoh baris diurutkan menggunakan kolom sorting key tabel sumber.
+        </p>
+
+        <div class="category-tabs" role="tablist" aria-label="Kategori contoh pratinjau">
+          <button
+            v-for="category in categories"
+            :key="category.key"
+            type="button"
+            role="tab"
+            :aria-selected="activeCategory === category.key"
+            :class="{ 'category-tab--active': activeCategory === category.key }"
+            @click="activeCategory = category.key"
+          >
+            {{ category.label }}
+            <span>{{ formatNumber(previewResult.statistics[category.countKey]) }}</span>
+          </button>
+        </div>
+
+        <p v-if="activeExamples.length === 0" class="field-message" role="status">
+          Tidak ada contoh baris untuk kategori {{ activeCategoryLabel }}.
+        </p>
+        <div v-else class="preview-table-viewport">
+          <table class="preview-table">
+            <thead>
+              <tr>
+                <th v-for="column in previewResult.keyColumns" :key="column.valueKey" scope="col">
+                  {{ column.name }} (kunci)
+                </th>
+                <th scope="col">{{ previewResult.sourceColumn }} (sumber)</th>
+                <th scope="col">{{ previewResult.targetColumn }} (sebelum)</th>
+                <th scope="col">{{ previewResult.targetColumn }} (usulan)</th>
+                <th scope="col">Kunci master yang cocok</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in activeExamples" :key="index">
+                <td v-for="column in previewResult.keyColumns" :key="column.valueKey">
+                  {{ displayValue(row[column.valueKey]) }}
+                </td>
+                <td>{{ displayValue(row.__source_text) }}</td>
+                <td>{{ displayValue(row.__target_before) }}</td>
+                <td>{{ displayValue(row.suggested_value) }}</td>
+                <td>{{ displayValue(row.matched_master_key) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <p v-else class="field-message">Contoh baris dan tab kategori akan tersedia setelah pratinjau.</p>
+    </section>
+
+    <div v-if="showApplyConfirmation" class="confirmation-backdrop" aria-hidden="true"></div>
     <section
       v-if="showApplyConfirmation"
-      class="kartu apply-confirmation"
+      class="kartu apply-confirmation span-12"
       role="dialog"
       aria-modal="true"
       aria-labelledby="apply-confirmation-title"
@@ -296,116 +417,6 @@
       </div>
     </section>
 
-    <section v-if="applyResult" class="kartu apply-result" aria-live="polite">
-      <h2 class="card-title">Penerapan berhasil</h2>
-      <p class="field-message">Tabel sumber tetap tidak diubah. Tabel hasil baru sudah selesai diverifikasi.</p>
-      <p v-if="applyResult.historyWarning" class="field-message field-error" role="status">
-        {{ applyResult.historyWarning }}
-      </p>
-      <dl class="apply-summary">
-        <div>
-          <dt>Tabel hasil</dt>
-          <dd><code>{{ applyResult.database }}.{{ applyResult.tableName }}</code></dd>
-        </div>
-        <div>
-          <dt>Jumlah baris</dt>
-          <dd>{{ formatNumber(applyResult.rowCount) }}</dd>
-        </div>
-        <div>
-          <dt>Baris terisi</dt>
-          <dd>{{ formatNumber(applyResult.filledRows) }}</dd>
-        </div>
-        <div>
-          <dt>Baris ambigu dibiarkan kosong</dt>
-          <dd>{{ formatNumber(applyResult.ambiguousRowsLeftEmpty) }}</dd>
-        </div>
-        <div>
-          <dt>Durasi</dt>
-          <dd>{{ formatDuration(applyResult.durationMs) }}</dd>
-        </div>
-      </dl>
-      <button class="preview-button" type="button" @click="viewResultTable">
-        Lihat isi tabel hasil
-      </button>
-    </section>
-
-    <section v-if="previewResult" class="kartu result-card" aria-live="polite">
-      <h2 class="card-title">Hasil pratinjau</h2>
-      <div class="statistics-grid">
-        <article class="statistic-card">
-          <span>Jumlah baris sumber</span>
-          <strong>{{ formatNumber(previewResult.statistics.sourceRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Target kosong</span>
-          <strong>{{ formatNumber(previewResult.statistics.targetEmptyRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Bisa diisi</span>
-          <strong>{{ formatNumber(previewResult.statistics.fillableRows) }}</strong>
-        </article>
-        <article class="statistic-card statistic-warning">
-          <span>Ambigu</span>
-          <strong>{{ formatNumber(previewResult.statistics.ambiguousRows) }}</strong>
-        </article>
-        <article class="statistic-card">
-          <span>Tetap kosong</span>
-          <strong>{{ formatNumber(previewResult.statistics.remainingEmptyRows) }}</strong>
-        </article>
-      </div>
-
-      <p v-if="!previewResult.orderedBySortingKey" class="field-message" role="status">
-        Tabel sumber tidak memiliki sorting key; urutan contoh baris tidak dijamin.
-      </p>
-      <p v-else class="field-message" role="status">
-        Contoh baris diurutkan menggunakan kolom sorting key tabel sumber.
-      </p>
-
-      <div class="category-tabs" role="tablist" aria-label="Kategori contoh pratinjau">
-        <button
-          v-for="category in categories"
-          :key="category.key"
-          type="button"
-          role="tab"
-          :aria-selected="activeCategory === category.key"
-          :class="{ 'category-tab--active': activeCategory === category.key }"
-          @click="activeCategory = category.key"
-        >
-          {{ category.label }}
-          <span>{{ formatNumber(previewResult.statistics[category.countKey]) }}</span>
-        </button>
-      </div>
-
-      <p v-if="activeExamples.length === 0" class="field-message" role="status">
-        Tidak ada contoh baris untuk kategori {{ activeCategoryLabel }}.
-      </p>
-      <div v-else class="preview-table-viewport">
-        <table class="preview-table">
-          <thead>
-            <tr>
-              <th v-for="column in previewResult.keyColumns" :key="column.valueKey" scope="col">
-                {{ column.name }} (kunci)
-              </th>
-              <th scope="col">{{ previewResult.sourceColumn }} (sumber)</th>
-              <th scope="col">{{ previewResult.targetColumn }} (sebelum)</th>
-              <th scope="col">{{ previewResult.targetColumn }} (usulan)</th>
-              <th scope="col">Kunci master yang cocok</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(row, index) in activeExamples" :key="index">
-              <td v-for="column in previewResult.keyColumns" :key="column.valueKey">
-                {{ displayValue(row[column.valueKey]) }}
-              </td>
-              <td>{{ displayValue(row.__source_text) }}</td>
-              <td>{{ displayValue(row.__target_before) }}</td>
-              <td>{{ displayValue(row.suggested_value) }}</td>
-              <td>{{ displayValue(row.matched_master_key) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
   </div>
 </template>
 
@@ -811,8 +822,12 @@ onMounted(async () => {
 .result-card,
 .apply-confirmation,
 .apply-result {
-  max-width: 920px;
-  margin-top: 20px;
+  min-width: 0;
+  margin: 0;
+}
+
+.cleansing-card {
+  align-self: start;
 }
 
 .cleansing-form {
@@ -955,7 +970,23 @@ onMounted(async () => {
 }
 
 .apply-confirmation {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  z-index: 11;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  transform: translate(-50%, -50%);
   border-top: 3px solid var(--warna-pistachio);
+  box-shadow: 0 18px 60px rgb(26 43 60 / 24%);
+}
+
+.confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(26 43 60 / 48%);
 }
 
 .save-original-option {
@@ -1017,6 +1048,7 @@ onMounted(async () => {
 }
 
 .apply-result {
+  align-self: start;
   border-top: 3px solid var(--warna-pistachio);
 }
 
@@ -1143,6 +1175,16 @@ onMounted(async () => {
 
   .feature-description {
     grid-column: auto;
+  }
+
+  .statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1100px) {
+  .cleansing-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .statistics-grid {
