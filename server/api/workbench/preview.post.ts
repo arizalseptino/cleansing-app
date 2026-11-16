@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
 
   const totalRows = await client.query({
     query: `SELECT count() AS total FROM (${compiled.sql})`,
+    query_params: compiled.params,
     format: 'JSONEachRow',
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })
@@ -24,6 +25,7 @@ export default defineEventHandler(async (event) => {
 
   const rowsResult = await client.query({
     query: `SELECT * FROM (${compiled.sql}) LIMIT ${limit} OFFSET ${offset}`,
+    query_params: compiled.params,
     format: 'JSON',
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })

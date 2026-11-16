@@ -237,23 +237,18 @@
           </nav>
         </template>
 
-        <section v-if="statistics" class="wb-statistics" aria-live="polite">
+        <section v-if="statistics || statisticsError" class="wb-statistics" aria-live="polite">
           <h3>Statistik langkah {{ selectedStep }}</h3>
-          <p>{{ numberFormat(statistics.totalRows) }} baris diperiksa.</p>
-          <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
-            <strong>{{ columnName }}</strong>
-            <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
-            <span>Menjadi NULL: {{ numberFormat(columnStats.becameNull) }}</span>
-            <span>NULL menjadi terisi: {{ numberFormat(columnStats.wasNullThenFilled) }}</span>
-          </div>
-          <div v-for="(value, key) in statisticExtras" :key="key" class="wb-stat-column">
-            <strong>{{ key }}</strong>
-            <span>{{ typeof value === 'number' ? numberFormat(value) : formatJson(value) }}</span>
-          </div>
-          <p v-if="Object.keys(statistics.stats).length === 0">API tidak mengirimkan statistik per kolom.</p>
-          <p class="wb-warning" role="status">
-            Endpoint statistik saat ini belum menghitung perubahan dan mengirim nilai nol; angka ini belum dapat dijadikan hasil pengukuran.
-          </p>
+          <template v-if="statistics">
+            <p>{{ numberFormat(statistics.rowsIn) }} baris masuk · {{ numberFormat(statistics.rowsOut) }} baris keluar.</p>
+            <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
+              <strong>{{ columnName }}</strong>
+              <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
+              <span>NULL/kosong sebelum: {{ columnStats.beforeNullOrEmpty === null ? 'Tidak ada pada sumber' : numberFormat(columnStats.beforeNullOrEmpty) }}</span>
+              <span>NULL/kosong sesudah: {{ numberFormat(columnStats.afterNullOrEmpty) }}</span>
+            </div>
+            <p v-if="Object.keys(statistics.stats).length === 0">Tidak ada kolom yang berubah untuk diringkas.</p>
+          </template>
           <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
         </section>
       </section>
@@ -362,6 +357,21 @@
       <template v-else>
         <form class="wb-save-form" @submit.prevent="applyPipeline">
           <p class="wb-safety-note">Tabel sumber <code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> tidak akan diubah.</p>
+          <section class="wb-save-statistics" aria-live="polite">
+            <h3>Ringkasan seluruh pipeline</h3>
+            <p v-if="pipelineStatisticsPending" class="wb-message" role="status">Menghitung ringkasan sebelum dan sesudah...</p>
+            <p v-else-if="pipelineStatisticsError" class="wb-error" role="alert">{{ pipelineStatisticsError }}</p>
+            <template v-else-if="pipelineStatistics">
+              <p>{{ numberFormat(pipelineStatistics.rowsIn) }} baris sumber · {{ numberFormat(pipelineStatistics.rowsOut) }} baris hasil</p>
+              <div v-for="(columnStats, columnName) in pipelineStatistics.stats" :key="columnName" class="wb-stat-column">
+                <strong>{{ columnName }}</strong>
+                <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
+                <span>NULL/kosong sebelum: {{ columnStats.beforeNullOrEmpty === null ? 'Tidak tersedia pada sumber' : numberFormat(columnStats.beforeNullOrEmpty) }}</span>
+                <span>NULL/kosong sesudah: {{ numberFormat(columnStats.afterNullOrEmpty) }}</span>
+              </div>
+              <p v-if="Object.keys(pipelineStatistics.stats).length === 0">Tidak ada kolom yang berubah untuk diringkas.</p>
+            </template>
+          </section>
           <label for="wb-result-name">Nama tabel hasil</label>
           <input id="wb-result-name" v-model="resultTableName" maxlength="64" required :disabled="applying" />
           <p v-if="resultTableName && !validResultName" class="wb-error" role="alert">
@@ -391,17 +401,16 @@
           </fieldset>
 
           <label class="wb-save-original">
-            <input v-model="saveOriginal" type="checkbox" disabled />
+            <input v-model="saveOriginal" type="checkbox" :disabled="applying || originalColumnNames.length === 0" />
             <span>
               Simpan nilai sebelum perubahan
               <template v-if="originalColumnNames.length">
                 di <code>{{ originalColumnNames.map((column) => `${column}_asli`).join(', ') }}</code>
               </template>
+              <template v-else> (tidak ada kolom sumber yang memenuhi syarat)</template>
             </span>
           </label>
-          <p class="wb-warning" role="status">
-            Belum tersedia, jadi opsi ini dinonaktifkan. Jika kelak diaktifkan, yang disalin adalah nilai awal kolom yang diubah, bukan nilai kolom baru seperti Nomor.
-          </p>
+          <p class="wb-message">Nilai yang disimpan berasal langsung dari tabel sumber, sebelum langkah pipeline dijalankan.</p>
 
           <div>
             <h3>Ringkasan langkah</h3>
@@ -444,8 +453,16 @@ type PreviewRow = Record<string, unknown>
 type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number }
 type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string }> }
 type StatisticsResponse = {
+  scope: 'step' | 'pipeline'
+  step?: number
+  rowsIn: number
+  rowsOut: number
   totalRows: number
-  stats: Record<string, { changed: number; becameNull: number; wasNullThenFilled: number }>
+  stats: Record<string, {
+    changed: number
+    beforeNullOrEmpty: number | null
+    afterNullOrEmpty: number
+  }>
   [key: string]: unknown
 }
 type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[] }
@@ -481,6 +498,9 @@ const previewRows = ref<PreviewRow[]>([])
 const totalRows = ref(0)
 const statistics = ref<StatisticsResponse | null>(null)
 const statisticsError = ref('')
+const pipelineStatistics = ref<StatisticsResponse | null>(null)
+const pipelineStatisticsError = ref('')
+const pipelineStatisticsPending = ref(false)
 const sqlPending = ref(false)
 const sqlError = ref('')
 const sqlResult = ref<SqlResponse | null>(null)
@@ -509,6 +529,7 @@ let previewController: AbortController | null = null
 let previewRequest = 0
 let schemaRequest = 0
 let statisticsRequest = 0
+let pipelineStatisticsRequest = 0
 let masterColumnsRequest = 0
 let returnFocusElement: HTMLElement | null = null
 
@@ -539,21 +560,12 @@ const schemaBeforeSelectedStep = computed(() => selectedStep.value > 0
         : sourceColumns.value
       : finalSchema.value)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / limit.value)))
-const touchedColumnsForStats = computed(() => {
-  const step = pipeline.value.steps[selectedStep.value - 1]
-  return step ? touchedColumns(step) : []
-})
-const statisticExtras = computed(() => {
-  if (!statistics.value) return {}
-  const { totalRows: _totalRows, stats: _stats, ...extras } = statistics.value
-  return extras
-})
 const validResultName = computed(() => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(resultTableName.value))
 const originalColumnNames = computed(() => [...new Set(
   pipeline.value.steps
     .filter((step) => step.op !== 'add_column')
     .flatMap((step) => touchedColumns(step)),
-)])
+) ].filter((name) => sourceColumns.value.some((column) => column.name === name)))
 const canApply = computed(() => sourceReady.value
   && pipeline.value.steps.length > 0
   && validResultName.value
@@ -917,7 +929,7 @@ async function loadStatistics(): Promise<void> {
         source: pipeline.value.source,
         steps: pipeline.value.steps.slice(0, selectedStep.value),
         step: selectedStep.value,
-        touchedColumns: touchedColumnsForStats.value,
+        scope: 'step',
       },
     })
     if (request === statisticsRequest) statistics.value = response
@@ -1000,7 +1012,34 @@ function openSaveDialog(): void {
   saveOriginal.value = false
   applyError.value = ''
   applyResult.value = null
+  pipelineStatistics.value = null
+  pipelineStatisticsError.value = ''
   showSaveDialog.value = true
+  void loadPipelineStatistics()
+}
+
+async function loadPipelineStatistics(): Promise<void> {
+  const request = ++pipelineStatisticsRequest
+  pipelineStatisticsPending.value = true
+  pipelineStatistics.value = null
+  pipelineStatisticsError.value = ''
+  try {
+    const response = await $fetch<StatisticsResponse>('/api/workbench/stats', {
+      method: 'POST',
+      body: {
+        source: pipeline.value.source,
+        steps: pipeline.value.steps,
+        scope: 'pipeline',
+      },
+    })
+    if (request === pipelineStatisticsRequest) pipelineStatistics.value = response
+  } catch (error) {
+    if (request === pipelineStatisticsRequest) {
+      pipelineStatisticsError.value = getErrorMessage(error, 'Ringkasan pipeline tidak dapat dihitung.')
+    }
+  } finally {
+    if (request === pipelineStatisticsRequest) pipelineStatisticsPending.value = false
+  }
 }
 
 function selectOrderBy(column: string): void {

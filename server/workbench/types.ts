@@ -81,5 +81,10 @@ export type CompiledPipeline = {
   sql: string
   params: Record<string, unknown>
   schema: ColumnMetadata[]
+  sourceSchema: ColumnMetadata[]
   stepSchemas: StepSchemaStatus[]
+  touchedColumns: string[]
+  addedColumns: string[]
+  lastStepTouchedColumns: string[]
+  lastStepAddedColumns: string[]
 }

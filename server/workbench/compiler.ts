@@ -11,9 +11,14 @@ function invalidStep(stepNumber: number, message: string): never {
   })
 }
 
-async function resolveSchema(client: ReturnType<typeof useClickHouse>, sql: string): Promise<ColumnMetadata[]> {
+async function resolveSchema(
+  client: ReturnType<typeof useClickHouse>,
+  sql: string,
+  params: Record<string, unknown>,
+): Promise<ColumnMetadata[]> {
   const result = await client.query({
     query: `SELECT * FROM (${sql}) LIMIT 0`,
+    query_params: params,
     format: 'JSON',
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })
@@ -29,7 +34,7 @@ async function resolveSchema(client: ReturnType<typeof useClickHouse>, sql: stri
 export async function compilePipeline(
   client: ReturnType<typeof useClickHouse>,
   pipeline: Pipeline,
-  options: { includeBefore?: boolean } = {},
+  options: { includeBefore?: boolean; includeSourceColumns?: string[] } = {},
 ): Promise<CompiledPipeline> {
   if (!pipeline || !pipeline.source || !pipeline.source.database || !pipeline.source.table) {
     throw createError({
@@ -48,10 +53,35 @@ export async function compilePipeline(
   }
 
   const metadata = await getTableMetadata(client, pipeline.source)
-  let schema = await getTableColumns(client, pipeline.source)
+  const sourceSchema = await getTableColumns(client, pipeline.source)
+  let schema = sourceSchema
   const stepSchemas: StepSchemaStatus[] = []
-  let currentSql = buildInputSql(pipeline.source)
+  const sourceColumns = [...new Set(options.includeSourceColumns ?? [])]
+  for (const column of sourceColumns) {
+    if (!sourceSchema.some((item) => item.name === column)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Kolom pembanding tidak valid',
+        message: 'Kolom pembanding harus berasal dari skema tabel sumber.',
+      })
+    }
+    if (sourceSchema.some((item) => item.name === `__sumber_${column}`)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Nama kolom sementara bertabrakan',
+        message: 'Kolom sumber memiliki nama yang bertabrakan dengan kolom statistik sementara.',
+      })
+    }
+  }
+  const initialSql = buildInputSql(pipeline.source)
+  let currentSql = sourceColumns.length
+    ? `SELECT *, ${sourceColumns.map((column) => `${quoteIdentifier(column)} AS ${quoteIdentifier(`__sumber_${column}`)}`).join(', ')} FROM (${initialSql})`
+    : initialSql
   const boundParams: Record<string, unknown> = {}
+  const touchedColumns = new Set<string>()
+  const addedColumns = new Set<string>()
+  let lastStepTouchedColumns: string[] = []
+  let lastStepAddedColumns: string[] = []
 
   for (let index = 0; index < pipeline.steps.length; index += 1) {
     const step = pipeline.steps[index]
@@ -70,29 +100,42 @@ export async function compilePipeline(
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)
+      lastStepTouchedColumns = [...new Set(compiled.touchedColumns)]
+      lastStepAddedColumns = [...new Set(compiled.addedColumns)]
+      for (const column of lastStepTouchedColumns) touchedColumns.add(column)
+      for (const column of lastStepAddedColumns) addedColumns.add(column)
       const includeBefore = options.includeBefore && index === pipeline.steps.length - 1
       const beforeColumns = [...new Set(compiled.beforeColumns ?? compiled.touchedColumns)]
       const beforeAliases = includeBefore
         ? beforeColumns.map((column) => `__sebelum_${column}`)
         : []
+      const reservedAliases = [
+        ...sourceColumns.map((column) => `__sumber_${column}`),
+        ...beforeAliases,
+      ]
 
       for (const alias of beforeAliases) {
         if (schema.some((column) => column.name === alias)) {
           invalidStep(index + 1, `Kolom sementara ${alias} sudah ada pada skema masukan.`)
         }
       }
+      if (compiled.addedColumns.some((column) => reservedAliases.includes(column))) {
+        invalidStep(index + 1, 'Nama kolom baru bertabrakan dengan kolom sementara pipeline.')
+      }
 
       const inputSql = beforeColumns.length && includeBefore
         ? `SELECT *, ${beforeColumns.map((column) => `${quoteIdentifier(column)} AS ${quoteIdentifier(`__sebelum_${column}`)}`).join(', ')} FROM (${currentSql})`
         : currentSql
-      const nextSql = compiled.sql.replace(/__INPUT__/g, `(${inputSql})`)
+      let stepSql = compiled.sql
+      for (const [key, value] of Object.entries(compiled.params)) {
+        const parameterName = `wb_s${index}_${key}`
+        stepSql = stepSql.replace(new RegExp(`\\{${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`, 'g'), `{${parameterName}:`)
+        boundParams[parameterName] = value
+      }
+      const nextSql = stepSql.replace(/__INPUT__/g, `(${inputSql})`)
       currentSql = nextSql
 
-      for (const [key, value] of Object.entries(compiled.params)) {
-        boundParams[key] = value
-      }
-
-      schema = await resolveSchema(client, currentSql)
+      schema = await resolveSchema(client, currentSql, boundParams)
       stepSchemas.push({
         index,
         valid: true,
@@ -114,6 +157,11 @@ export async function compilePipeline(
     sql: currentSql,
     params: boundParams,
     schema,
+    sourceSchema,
     stepSchemas,
+    touchedColumns: [...touchedColumns],
+    addedColumns: [...addedColumns],
+    lastStepTouchedColumns,
+    lastStepAddedColumns,
   }
 }
