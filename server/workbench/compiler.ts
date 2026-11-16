@@ -80,6 +80,8 @@ export async function compilePipeline(
   const boundParams: Record<string, unknown> = {}
   const touchedColumns = new Set<string>()
   const addedColumns = new Set<string>()
+  const warnings: string[] = []
+  let changesRowCount = false
   let lastStepTouchedColumns: string[] = []
   let lastStepAddedColumns: string[] = []
 
@@ -100,6 +102,8 @@ export async function compilePipeline(
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)
+      changesRowCount ||= operation.changesRowCount === true
+      for (const warning of compiled.warnings ?? []) warnings.push(`Langkah ${index + 1}: ${warning}`)
       lastStepTouchedColumns = [...new Set(compiled.touchedColumns)]
       lastStepAddedColumns = [...new Set(compiled.addedColumns)]
       for (const column of lastStepTouchedColumns) touchedColumns.add(column)
@@ -140,6 +144,7 @@ export async function compilePipeline(
         index,
         valid: true,
         schema,
+        warnings: compiled.warnings ?? [],
       })
     } catch (error) {
       const detail = error && typeof error === 'object' && 'message' in error ? String((error as { message?: string }).message) : ''
@@ -148,7 +153,8 @@ export async function compilePipeline(
         valid: false,
         error: detail || 'Langkah tidak valid.',
       })
-      invalidStep(index + 1, detail || 'Langkah tidak valid.')
+      const stepPrefix = `Langkah ${index + 1}: `
+      invalidStep(index + 1, detail.startsWith(stepPrefix) ? detail.slice(stepPrefix.length) : detail || 'Langkah tidak valid.')
     }
   }
 
@@ -163,5 +169,7 @@ export async function compilePipeline(
     addedColumns: [...addedColumns],
     lastStepTouchedColumns,
     lastStepAddedColumns,
+    changesRowCount,
+    warnings,
   }
 }

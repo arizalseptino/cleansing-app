@@ -29,6 +29,8 @@ export type OperationParamType =
   | 'multiselect'
   | 'boolean'
   | 'pairs'
+  | 'string-list'
+  | 'rules'
   | 'table-ref'
 
 export type OperationParamDefinition = {
@@ -39,6 +41,9 @@ export type OperationParamDefinition = {
   required?: boolean
   options?: string[]
   allowEmpty?: boolean
+  allowNew?: boolean
+  defaultValue?: unknown
+  maxLength?: number
 }
 
 export type OperationDefinition = {
@@ -46,6 +51,7 @@ export type OperationDefinition = {
   name: string
   description: string
   params: OperationParamDefinition[]
+  changesRowCount?: boolean
   validate: (context: OperationContext) => void | Promise<void>
   compile: (context: OperationContext) => Promise<CompiledStep>
 }
@@ -56,6 +62,7 @@ export type CompiledStep = {
   touchedColumns: string[]
   addedColumns: string[]
   beforeColumns?: string[]
+  warnings?: string[]
 }
 
 export type OperationContext = {
@@ -74,6 +81,7 @@ export type StepSchemaStatus = {
   valid: boolean
   schema?: ColumnMetadata[]
   error?: string
+  warnings?: string[]
 }
 
 export type CompiledPipeline = {
@@ -87,4 +95,6 @@ export type CompiledPipeline = {
   addedColumns: string[]
   lastStepTouchedColumns: string[]
   lastStepAddedColumns: string[]
+  changesRowCount: boolean
+  warnings: string[]
 }

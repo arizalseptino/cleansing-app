@@ -14,5 +14,7 @@ export default defineEventHandler(async (event) => {
     sql: compiled.sql,
     params: compiled.params,
     schema: compiled.schema,
+    warnings: compiled.warnings,
+    changesRowCount: compiled.changesRowCount,
   }
 })

@@ -45,6 +45,7 @@ export default defineEventHandler(async (event) => {
     },
   }
   let sourceRows = 0
+  let expectedResultRows = 0
   let resultRows = 0
   let resultTableCreated = false
   let success = false
@@ -154,6 +155,15 @@ export default defineEventHandler(async (event) => {
     const [sourceCountRow] = await sourceCount.json<{ total: number | string }[]>()
     sourceRows = countValue(sourceCountRow?.total, 'jumlah baris sumber')
 
+    const pipelineCount = await client.query({
+      query: `SELECT count() AS total FROM (${compiled.sql})`,
+      query_params: compiled.params,
+      format: 'JSONEachRow',
+      clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+    })
+    const [pipelineCountRow] = await pipelineCount.json<{ total: number | string }[]>()
+    expectedResultRows = countValue(pipelineCountRow?.total, 'jumlah baris hasil pipeline')
+
     const tableIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(resultTableName)}`
     const existing = await client.query({
       query: 'SELECT name FROM system.tables WHERE database = {database:String} AND name = {table:String} LIMIT 1',
@@ -188,13 +198,20 @@ export default defineEventHandler(async (event) => {
     })
     const [resultCountRow] = await countResult.json<{ total: number | string }[]>()
     resultRows = countValue(resultCountRow?.total, 'jumlah baris hasil')
+    if (resultRows !== expectedResultRows) {
+      badRequest(
+        500,
+        'Verifikasi jumlah baris gagal',
+        `Jumlah baris tabel hasil (${resultRows}) berbeda dari hitungan pipeline (${expectedResultRows}).`,
+      )
+    }
 
     const requiredOriginalColumns = saveOriginalForHistory
       ? compiled.schema
         .filter(({ name }) => name.endsWith('_asli') && compiled.touchedColumns.some((column) => `${column}_asli` === name))
         .map(({ name }) => name)
       : []
-    let verification = 'Jumlah baris hasil berhasil diverifikasi.'
+    let verification = `Jumlah baris hasil (${resultRows}) sesuai hitungan pipeline (${expectedResultRows}).`
     if (requiredOriginalColumns.length) {
       const originalColumnResult = await client.query({
         query: 'SELECT name, type FROM system.columns WHERE database = {database:String} AND table = {table:String}',
@@ -210,7 +227,7 @@ export default defineEventHandler(async (event) => {
       if (invalid) {
         badRequest(500, 'Verifikasi nilai asli gagal', 'Kolom nilai asli tidak ditemukan dengan tipe yang sesuai pada tabel hasil.')
       }
-      verification = `${requiredOriginalColumns.length} kolom nilai asli ditemukan dan jumlah baris hasil berhasil diverifikasi.`
+      verification = `${requiredOriginalColumns.length} kolom nilai asli ditemukan dan jumlah baris hasil (${resultRows}) sesuai hitungan pipeline (${expectedResultRows}).`
     }
 
     success = true

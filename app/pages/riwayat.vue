@@ -1,11 +1,5 @@
 <template>
   <div class="bento">
-    <header class="bento-heading">
-    <p class="page-kicker">Ruang kerja</p>
-    <h1 class="page-title">Riwayat cleansing</h1>
-    <p class="page-description">Lihat ringkasan penerapan cleansing yang pernah dijalankan.</p>
-    </header>
-
     <article class="kartu history-stat span-4" aria-live="polite">
       <span>Penerapan dimuat</span>
       <strong v-if="!pending && !errorMessage">{{ formatNumber(entries.length) }}</strong>

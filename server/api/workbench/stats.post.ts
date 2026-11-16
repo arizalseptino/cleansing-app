@@ -53,6 +53,7 @@ export default defineEventHandler(async (event) => {
     let compiled
     let columns: string[]
     let beforeAlias: (column: string) => string | null
+    let deduplicateStepIndex = -1
 
     if (scope === 'step') {
       const stepNumber = Number('step' in body ? body.step : 1)
@@ -76,6 +77,7 @@ export default defineEventHandler(async (event) => {
       })
       const [inputCount] = await inputRows.json<{ total: number | string }[]>()
       rowsIn = countValue(inputCount?.total, 'jumlah baris masuk')
+      if (steps[steps.length - 1]?.op === 'deduplicate') deduplicateStepIndex = steps.length - 1
     } else {
       const initial = await compilePipeline(client, pipeline)
       columns = [...new Set([...initial.touchedColumns, ...initial.addedColumns])]
@@ -94,6 +96,9 @@ export default defineEventHandler(async (event) => {
       })
       const [sourceCount] = await sourceRows.json<{ total: number | string }[]>()
       rowsIn = countValue(sourceCount?.total, 'jumlah baris sumber')
+      deduplicateStepIndex = pipeline.steps.map((step, index) => step.op === 'deduplicate' ? index : -1)
+        .filter((index) => index >= 0)
+        .pop() ?? -1
     }
 
     const selected = columns.map((column, index) => {
@@ -135,6 +140,7 @@ export default defineEventHandler(async (event) => {
     }
 
     const rowsOut = countValue(row.rows_out as number | string | undefined, 'jumlah baris keluar')
+    const droppedRows = Math.max(0, rowsIn - rowsOut)
     const stats: Record<string, ColumnStatistics> = {}
     for (const { column, index } of selected) {
       const beforeValue = row[`before_empty_${index}`]
@@ -147,13 +153,54 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    let deduplicateStats: { duplicateGroups: number; discardedRows: number; conflictGroups: number } | undefined
+    if (deduplicateStepIndex >= 0) {
+      const step = pipeline.steps[deduplicateStepIndex]
+      const input = await compilePipeline(client, {
+        ...pipeline,
+        steps: pipeline.steps.slice(0, deduplicateStepIndex),
+      })
+      const keys = Array.isArray(step.params?.keyColumns)
+        ? step.params.keyColumns.filter((column): column is string => typeof column === 'string')
+        : []
+      const keySql = keys.map(quoteIdentifier)
+      const nonKeyColumns = input.schema
+        .map(({ name }) => name)
+        .filter((name) => !keys.includes(name))
+      const allKeysNull = keySql.map((column) => `isNull(${column})`).join(' AND ')
+      const distinctContent = nonKeyColumns.length
+        ? `uniqExact(tuple(${nonKeyColumns.map(quoteIdentifier).join(', ')}))`
+        : 'uniqExact(tuple())'
+      const grouped = await client.query({
+        query: `SELECT countIf(group_rows > 1) AS duplicate_groups, sum(if(group_rows > 1, group_rows - 1, 0)) AS discarded_rows, countIf(group_rows > 1 AND distinct_content > 1) AS conflict_groups
+FROM (
+  SELECT count() AS group_rows, ${distinctContent} AS distinct_content
+  FROM (${input.sql})
+  WHERE NOT (${allKeysNull})
+  GROUP BY ${keySql.join(', ')}
+)`,
+        query_params: input.params,
+        format: 'JSONEachRow',
+        clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+      })
+      const [groupRow] = await grouped.json<Record<string, number | string>[]>()
+      if (!groupRow) badRequest('Statistik deduplikasi tidak dapat dihitung.')
+      deduplicateStats = {
+        duplicateGroups: countValue(groupRow.duplicate_groups, 'jumlah grup duplikat'),
+        discardedRows: countValue(groupRow.discarded_rows, 'jumlah baris dibuang'),
+        conflictGroups: countValue(groupRow.conflict_groups, 'jumlah grup konflik isi'),
+      }
+    }
+
     return {
       scope,
       step: scope === 'step' ? Number('step' in body ? body.step : 1) : undefined,
       rowsIn,
       rowsOut,
+      rowsDropped: droppedRows,
       totalRows: rowsOut,
       stats,
+      ...(deduplicateStats ?? {}),
     }
   } catch (error) {
     if (error && typeof error === 'object' && 'statusCode' in error) throw error

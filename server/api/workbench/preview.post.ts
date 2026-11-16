@@ -10,9 +10,16 @@ export default defineEventHandler(async (event) => {
 
   const client = useClickHouse()
   const compiled = await compilePipeline(client, pipeline, { includeBefore: true })
-  const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 100)
-  const page = Math.max(Number(body.page ?? 1), 1)
-  const offset = (page - 1) * limit
+  const requestedLimit = Number(body.limit ?? 50)
+  if (!Number.isSafeInteger(requestedLimit)) {
+    throw createError({ statusCode: 400, statusMessage: 'Batas pratinjau tidak valid', message: 'Batas baris pratinjau harus berupa bilangan bulat.' })
+  }
+  const limit = Math.min(Math.max(requestedLimit, 1), 100)
+  const requestedPage = Number(body.page ?? 1)
+  if (!Number.isSafeInteger(requestedPage) || requestedPage < 1) {
+    throw createError({ statusCode: 400, statusMessage: 'Halaman pratinjau tidak valid', message: 'Nomor halaman harus berupa bilangan bulat positif.' })
+  }
+  const page = requestedPage
 
   const totalRows = await client.query({
     query: `SELECT count() AS total FROM (${compiled.sql})`,
@@ -21,7 +28,12 @@ export default defineEventHandler(async (event) => {
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })
   const totalJson = await totalRows.json<{ total: number }[]>()
-  const total = totalJson[0]?.total ?? 0
+  const total = Number(totalJson[0]?.total ?? 0)
+  const effectivePage = Math.min(page, Math.max(1, Math.ceil(total / limit)))
+  const offset = (effectivePage - 1) * limit
+  if (!Number.isSafeInteger(offset)) {
+    throw createError({ statusCode: 400, statusMessage: 'Halaman pratinjau terlalu besar', message: 'Nomor halaman yang diminta berada di luar batas.' })
+  }
 
   const rowsResult = await client.query({
     query: `SELECT * FROM (${compiled.sql}) LIMIT ${limit} OFFSET ${offset}`,
@@ -37,7 +49,9 @@ export default defineEventHandler(async (event) => {
     columns,
     rows,
     totalRows: total,
-    page,
+    page: effectivePage,
     limit,
+    warnings: compiled.warnings,
+    changesRowCount: compiled.changesRowCount,
   }
 })

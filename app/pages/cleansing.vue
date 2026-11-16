@@ -1,11 +1,5 @@
 <template>
   <div class="workbench-page">
-    <header class="bento-heading">
-      <p class="page-kicker">Ruang kerja</p>
-      <h1 class="page-title">Cleansing data</h1>
-      <p class="page-description">Susun operasi, periksa hasilnya, lalu simpan sebagai tabel baru.</p>
-    </header>
-
     <section class="kartu wb-source" aria-label="Sumber data">
       <div class="wb-source-title">
         <h2 class="card-title">Sumber</h2>
@@ -127,6 +121,9 @@
                 <p v-if="stepStates[index]?.status === 'error'" class="wb-step-error" role="alert">
                   {{ stepStates[index]?.message }}
                 </p>
+                <p v-for="warning in stepStates[index]?.warnings ?? []" :key="warning" class="wb-message" role="status">
+                  {{ warning }}
+                </p>
               </div>
             </li>
           </ol>
@@ -169,6 +166,7 @@
           </button>
           <span v-if="previewPending" class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
         </div>
+        <p v-for="warning in previewWarnings" :key="warning" class="wb-message" role="status">{{ warning }}</p>
         <p v-if="!sourceReady" class="wb-message">Pilih sumber untuk melihat data.</p>
         <p v-else-if="previewPending && previewRows.length === 0" class="wb-message" role="status">Memuat data...</p>
         <p v-else-if="previewError" class="wb-message wb-error" role="alert">{{ previewError }}</p>
@@ -240,7 +238,12 @@
         <section v-if="statistics || statisticsError" class="wb-statistics" aria-live="polite">
           <h3>Statistik langkah {{ selectedStep }}</h3>
           <template v-if="statistics">
-            <p>{{ numberFormat(statistics.rowsIn) }} baris masuk · {{ numberFormat(statistics.rowsOut) }} baris keluar.</p>
+            <p>{{ numberFormat(statistics.rowsIn) }} baris masuk · {{ numberFormat(statistics.rowsOut) }} baris keluar · {{ numberFormat(statistics.rowsDropped) }} baris dibuang.</p>
+            <p v-if="statistics.duplicateGroups !== undefined">
+              {{ numberFormat(statistics.duplicateGroups) }} grup duplikat ·
+              {{ numberFormat(statistics.discardedRows) }} baris dibuang ·
+              {{ numberFormat(statistics.conflictGroups) }} grup memiliki isi yang berbeda.
+            </p>
             <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
               <strong>{{ columnName }}</strong>
               <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
@@ -362,7 +365,12 @@
             <p v-if="pipelineStatisticsPending" class="wb-message" role="status">Menghitung ringkasan sebelum dan sesudah...</p>
             <p v-else-if="pipelineStatisticsError" class="wb-error" role="alert">{{ pipelineStatisticsError }}</p>
             <template v-else-if="pipelineStatistics">
-              <p>{{ numberFormat(pipelineStatistics.rowsIn) }} baris sumber · {{ numberFormat(pipelineStatistics.rowsOut) }} baris hasil</p>
+              <p>{{ numberFormat(pipelineStatistics.rowsIn) }} baris masuk · {{ numberFormat(pipelineStatistics.rowsOut) }} baris hasil · {{ numberFormat(pipelineStatistics.rowsDropped) }} baris dibuang</p>
+              <p v-if="pipelineStatistics.duplicateGroups !== undefined">
+                {{ numberFormat(pipelineStatistics.duplicateGroups) }} grup duplikat ·
+                {{ numberFormat(pipelineStatistics.discardedRows) }} baris dibuang ·
+                {{ numberFormat(pipelineStatistics.conflictGroups) }} grup memiliki isi yang berbeda.
+              </p>
               <div v-for="(columnStats, columnName) in pipelineStatistics.stats" :key="columnName" class="wb-stat-column">
                 <strong>{{ columnName }}</strong>
                 <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
@@ -448,10 +456,10 @@ type Table = { name: string; engine?: string }
 type Column = { name: string; type: string }
 type OperationParam = { key: string; label: string; description: string; type: string; required?: boolean; options?: string[] }
 type Operation = { id: string; name: string; description: string; params: OperationParam[] }
-type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; message?: string }
+type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; message?: string; warnings?: string[] }
 type PreviewRow = Record<string, unknown>
-type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number }
-type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string }> }
+type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number; warnings?: string[] }
+type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string; warnings?: string[] }> }
 type StatisticsResponse = {
   scope: 'step' | 'pipeline'
   step?: number
@@ -463,9 +471,13 @@ type StatisticsResponse = {
     beforeNullOrEmpty: number | null
     afterNullOrEmpty: number
   }>
+  rowsDropped: number
+  duplicateGroups?: number
+  discardedRows?: number
+  conflictGroups?: number
   [key: string]: unknown
 }
-type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[] }
+type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[]; warnings?: string[] }
 type ApplyResponse = {
   status: string
   database: string
@@ -495,6 +507,7 @@ const masterColumnsError = ref('')
 const previewPending = ref(false)
 const previewError = ref('')
 const previewRows = ref<PreviewRow[]>([])
+const previewWarnings = ref<string[]>([])
 const totalRows = ref(0)
 const statistics = ref<StatisticsResponse | null>(null)
 const statisticsError = ref('')
@@ -868,7 +881,11 @@ async function refreshStepSchemas(): Promise<void> {
         }
         break
       }
-      statuses.push({ status: 'valid', schema: response.schema ?? [] })
+      statuses.push({
+        status: 'valid',
+        schema: response.schema ?? [],
+        warnings: response.steps?.[index]?.warnings?.map((warning) => `Langkah ${index + 1}: ${warning}`) ?? [],
+      })
     } catch (error) {
       if (request !== schemaRequest) return
       const message = getErrorMessage(error, 'Skema langkah tidak dapat diperiksa.')
@@ -888,6 +905,7 @@ async function loadPreview(): Promise<void> {
   previewController = null
   if (!sourceReady.value) {
     previewRows.value = []
+    previewWarnings.value = []
     totalRows.value = 0
     previewError.value = ''
     previewPending.value = false
@@ -898,6 +916,7 @@ async function loadPreview(): Promise<void> {
   previewPending.value = true
   previewError.value = ''
   previewRows.value = []
+  previewWarnings.value = []
   const steps = pipeline.value.steps.slice(0, selectedStep.value)
   try {
     const response = await $fetch<PreviewResponse>('/api/workbench/preview', {
@@ -907,6 +926,7 @@ async function loadPreview(): Promise<void> {
     })
     if (request !== previewRequest) return
     previewRows.value = response.rows
+    previewWarnings.value = response.warnings ?? []
     totalRows.value = Number(response.totalRows)
     page.value = response.page
   } catch (error) {

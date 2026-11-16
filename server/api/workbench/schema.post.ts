@@ -15,6 +15,8 @@ export default defineEventHandler(async (event) => {
       source: pipeline.source,
       schema: compiled.schema,
       steps: compiled.stepSchemas,
+      changesRowCount: compiled.changesRowCount,
+      warnings: compiled.warnings,
     }
   } catch (error) {
     const message = error && typeof error === 'object' && 'message' in error ? String((error as { message?: string }).message) : 'Skema tidak valid.'

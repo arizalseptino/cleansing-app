@@ -1,11 +1,5 @@
 <template>
   <div class="bento">
-    <header class="bento-heading">
-    <p class="page-kicker">Ruang kerja</p>
-    <h1 class="page-title">Sumber data</h1>
-    <p class="page-description">Pilih database dan tabel ClickHouse yang ingin Anda bersihkan.</p>
-    </header>
-
       <article class="kartu source-card span-4" aria-label="Pilih sumber">
         <h2 class="card-title">Pilih sumber</h2>
 

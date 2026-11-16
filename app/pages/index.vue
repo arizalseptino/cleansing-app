@@ -1,11 +1,5 @@
 <template>
   <div class="bento">
-    <header class="bento-heading">
-      <p class="page-kicker">Ruang kerja</p>
-      <h1 class="page-title">Ringkasan BersihData</h1>
-      <p class="page-description">Pantau sumber data dan lanjutkan pekerjaan cleansing Anda.</p>
-    </header>
-
     <article class="kartu welcome-card span-7 row-2">
       <p class="eyebrow">Selamat datang</p>
       <h2>Cleansing data, lebih sederhana</h2>
