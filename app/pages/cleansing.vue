@@ -281,7 +281,7 @@
           <h3>Statistik langkah {{ selectedStep }}</h3>
           <template v-if="statistics">
             <p>{{ numberFormat(statistics.rowsIn) }} baris masuk · {{ numberFormat(statistics.rowsOut) }} baris keluar · {{ numberFormat(statistics.rowsDropped) }} baris dibuang.</p>
-            <p v-if="statistics.duplicateGroups !== undefined">
+            <p v-if="statistics.duplicateGroups !== undefined && statistics.discardedRows !== undefined && statistics.conflictGroups !== undefined">
               {{ numberFormat(statistics.duplicateGroups) }} grup duplikat ·
               {{ numberFormat(statistics.discardedRows) }} baris dibuang ·
               {{ numberFormat(statistics.conflictGroups) }} grup memiliki isi yang berbeda.
@@ -584,7 +584,7 @@
             <p v-else-if="pipelineStatisticsError" class="wb-error" role="alert">{{ pipelineStatisticsError }}</p>
             <template v-else-if="pipelineStatistics">
               <p>{{ numberFormat(pipelineStatistics.rowsIn) }} baris masuk · {{ numberFormat(pipelineStatistics.rowsOut) }} baris hasil · {{ numberFormat(pipelineStatistics.rowsDropped) }} baris dibuang</p>
-              <p v-if="pipelineStatistics.duplicateGroups !== undefined">
+              <p v-if="pipelineStatistics.duplicateGroups !== undefined && pipelineStatistics.discardedRows !== undefined && pipelineStatistics.conflictGroups !== undefined">
                 {{ numberFormat(pipelineStatistics.duplicateGroups) }} grup duplikat ·
                 {{ numberFormat(pipelineStatistics.discardedRows) }} baris dibuang ·
                 {{ numberFormat(pipelineStatistics.conflictGroups) }} grup memiliki isi yang berbeda.
@@ -1306,6 +1306,7 @@ function chooseOperation(operation: Operation, column = ''): void {
 
 function editStep(index: number): void {
   const step = pipeline.value.steps[index]
+  if (!step) return
   const operation = operations.value.find(({ id }) => id === step.op)
   if (!operation) return
   selectedStep.value = index + 1
@@ -1323,13 +1324,24 @@ function editStep(index: number): void {
 
 function commitForm(params: Record<string, unknown>): void {
   if (!selectedOperation.value) return
+
+  const editingStep = editingStepIndex.value === null
+    ? null
+    : pipeline.value.steps[editingStepIndex.value]
+
+  if (editingStepIndex.value !== null && editingStep == null) {
+    resetOperationForm()
+    return
+  }
+
   const changed: WorkbenchStep = {
-    id: editingStepIndex.value === null
-      ? `step-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      : pipeline.value.steps[editingStepIndex.value].id,
+    id: editingStep != null
+      ? editingStep.id
+      : `step-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     op: selectedOperation.value.id,
     params,
   }
+
   if (editingStepIndex.value === null) {
     const insertionIndex = Math.max(0, Math.min(insertAtIndex.value ?? pipeline.value.steps.length, pipeline.value.steps.length))
     pipeline.value.steps.splice(insertionIndex, 0, changed)
@@ -1346,9 +1358,12 @@ function commitForm(params: Record<string, unknown>): void {
 
 function moveStep(index: number, offset: number): void {
   const target = index + offset
-  if (target < 0 || target >= pipeline.value.steps.length) return
+  if (index < 0 || index >= pipeline.value.steps.length
+    || target < 0 || target >= pipeline.value.steps.length) return
   const selectedId = selectedStep.value > 0 ? pipeline.value.steps[selectedStep.value - 1]?.id : ''
-  const [step] = pipeline.value.steps.splice(index, 1)
+  const step = pipeline.value.steps[index]
+  if (!step) return
+  pipeline.value.steps.splice(index, 1)
   pipeline.value.steps.splice(target, 0, step)
   const selectedIndex = pipeline.value.steps.findIndex(({ id }) => id === selectedId)
   if (selectedIndex >= 0) selectedStep.value = selectedIndex + 1
@@ -1392,10 +1407,15 @@ async function refreshStepSchemas(): Promise<void> {
   for (let index = 0; index < steps.length; index += 1) {
     if (request !== schemaRequest) return
     stepStates.value = [...statuses, ...steps.slice(index).map(() => ({ status: 'loading' as const }))]
+    const step = steps[index]
+    if (!step) {
+      statuses.push({ status: 'error', message: `Langkah ${index + 1} tidak valid.` })
+      continue
+    }
     try {
       const response = await $fetch<SchemaResponse>('/api/workbench/schema', {
         method: 'POST',
-        body: { source, steps: [...validPrefix, steps[index]] },
+        body: { source, steps: [...validPrefix, step] },
       })
       if (request !== schemaRequest) return
       if (!response.valid) {
@@ -1405,7 +1425,7 @@ async function refreshStepSchemas(): Promise<void> {
         statuses.push({ status: 'error', message: `Langkah ${index + 1}: ${cleaned}` })
         continue
       }
-      validPrefix.push(steps[index])
+      validPrefix.push(step)
       const stepWarnings = response.steps?.[validPrefix.length - 1]?.warnings ?? []
       statuses.push({
         status: 'valid',
@@ -1977,6 +1997,7 @@ function handleDialogKeydown(event: KeyboardEvent): void {
   }
   const first = focusable[0]
   const last = focusable[focusable.length - 1]
+  if (!first || !last) return
   if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
     event.preventDefault()
     last.focus()
