@@ -130,6 +130,27 @@
           <p v-else class="wb-message">Belum ada langkah. Tambahkan operasi untuk membentuk hasil.</p>
         </template>
 
+        <div v-if="importSummary" class="wb-import-summary" role="status">
+          <p>
+            <strong>Resep "{{ importSummary.name }}":</strong>
+            {{ importSummary.valid }} langkah valid, {{ importSummary.invalid }} langkah bermasalah.
+          </p>
+          <p v-if="importSummary.suggestedSourceNote" class="wb-import-note">
+            {{ importSummary.suggestedSourceNote }}
+          </p>
+          <div class="wb-import-summary-actions">
+            <button
+              v-if="missingColumnReferences.length > 0"
+              class="wb-button wb-small"
+              type="button"
+              @click="openMappingDialog"
+            >
+              Pemetaan kolom ({{ missingColumnReferences.length }})
+            </button>
+            <button class="wb-link-button" type="button" @click="importSummary = null">Tutup ringkasan</button>
+          </div>
+        </div>
+
         <button
           class="wb-sql-link"
           type="button"
@@ -138,6 +159,20 @@
         >
           Lihat SQL
         </button>
+
+        <div class="wb-recipe-actions">
+          <button
+            class="wb-button wb-small"
+            type="button"
+            :disabled="!sourceReady || pipeline.steps.length === 0"
+            @click="openExportDialog"
+          >
+            Ekspor resep
+          </button>
+          <button class="wb-button wb-small" type="button" @click="openImportDialog">
+            Impor resep
+          </button>
+        </div>
       </section>
 
       <section class="kartu wb-data-card" aria-label="Data keluaran">
@@ -165,6 +200,13 @@
             Hitung statistik langkah ini
           </button>
           <span v-if="previewPending" class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
+        </div>
+        <div v-if="displayFilter" class="wb-filter-chip" role="status">
+          <span>
+            <strong>Penyaring tampilan</strong> (hanya memengaruhi tampilan pratinjau, tidak ikut pipeline atau tabel hasil):
+            <code>{{ displayFilter.column }}</code> = <code>{{ displayFilter.label }}</code>
+          </span>
+          <button class="wb-icon-button" type="button" @click="clearDisplayFilter">Lepas penyaring</button>
         </div>
         <p v-for="warning in previewWarnings" :key="warning" class="wb-message" role="status">{{ warning }}</p>
         <p v-if="!sourceReady" class="wb-message">Pilih sumber untuk melihat data.</p>
@@ -254,6 +296,111 @@
           </template>
           <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
         </section>
+
+        <section class="wb-rare-panel" aria-label="Nilai langka">
+          <div class="wb-rare-heading">
+            <div>
+              <h3>Nilai langka (long-tail)</h3>
+              <p>Analisis nilai teks yang jarang muncul setelah langkah ke-{{ selectedStep }}. Klik nilai untuk menyaring tampilan pratinjau.</p>
+            </div>
+          </div>
+
+          <p v-if="!sourceReady" class="wb-message">Pilih database dan tabel sumber untuk menganalisis nilai langka.</p>
+          <p v-else-if="rareTextColumns.length === 0" class="wb-message">Tidak ada kolom bertipe teks pada langkah ini.</p>
+          <template v-else>
+            <form class="wb-rare-controls" @submit.prevent="loadRareValues">
+              <label>
+                <span>Kolom teks</span>
+                <select v-model="rareColumn">
+                  <option value="">Pilih kolom teks</option>
+                  <option v-for="col in rareTextColumns" :key="col.name" :value="col.name">
+                    {{ col.name }} ({{ col.type }})
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>Ambang N (1-1000)</span>
+                <input v-model.number="rareThreshold" type="number" min="1" max="1000" required />
+              </label>
+              <label>
+                <span>Cari nilai</span>
+                <input v-model="rareSearch" type="text" maxlength="200" placeholder="Potongan teks..." />
+              </label>
+              <label>
+                <span>Batas daftar (maks. 200)</span>
+                <input v-model.number="rareLimit" type="number" min="1" max="200" required />
+              </label>
+              <div class="wb-rare-toggles">
+                <label class="wb-rare-check">
+                  <input v-model="rareExcludeNull" type="checkbox" />
+                  <span>Kecualikan (NULL)</span>
+                </label>
+                <label class="wb-rare-check">
+                  <input v-model="rareExcludeEmpty" type="checkbox" />
+                  <span>Kecualikan (kosong)</span>
+                </label>
+              </div>
+              <button class="wb-button wb-small wb-primary" type="submit" :disabled="!rareColumn || rarePending">
+                {{ rarePending ? 'Menganalisis...' : 'Cari nilai langka' }}
+              </button>
+            </form>
+
+            <p v-if="rareError" class="wb-message wb-error" role="alert">{{ rareError }}</p>
+            <template v-else-if="rareResult">
+              <p class="wb-rare-summary" role="status">
+                <strong>{{ numberFormat(rareResult.summary.uniqueValues) }}</strong> nilai unik ·
+                <strong>{{ numberFormat(rareResult.summary.rareValues) }}</strong> nilai langka (&lt; {{ rareResult.threshold }}) ·
+                <strong>{{ numberFormat(rareResult.summary.affectedRows) }}</strong> baris terdampak
+              </p>
+
+              <div v-if="selectedRareItems.length > 0" class="wb-rare-bulk">
+                <span>{{ selectedRareItems.length }} nilai dipilih</span>
+                <div>
+                  <button class="wb-button wb-small wb-primary" type="button" @click="createReplaceFromRare">
+                    Buat langkah ganti nilai
+                  </button>
+                  <button class="wb-button wb-small" type="button" @click="selectedRareKeys = []">
+                    Batal pilih
+                  </button>
+                </div>
+              </div>
+
+              <p v-if="rareResult.items.length === 0" class="wb-message">
+                Tidak ada nilai langka dengan kemunculan kurang dari {{ rareResult.threshold }}.
+              </p>
+              <ul v-else class="wb-rare-list">
+                <li
+                  v-for="(item, itemIdx) in rareResult.items"
+                  :key="`${item.jenis}-${item.nilai}-${itemIdx}`"
+                  :class="{ 'wb-rare-item-active': isRareItemFiltered(item) }"
+                >
+                  <input
+                    v-model="selectedRareKeys"
+                    type="checkbox"
+                    :value="rareItemKey(item)"
+                    :aria-label="`Pilih nilai ${item.nilai}`"
+                  />
+                  <button
+                    class="wb-rare-value-btn"
+                    type="button"
+                    :title="`Saring pratinjau untuk ${item.nilai}`"
+                    @click="toggleRareDisplayFilter(item)"
+                  >
+                    <span
+                      :class="{
+                        'wb-cell-null': item.jenis === 'null',
+                        'wb-cell-empty': item.jenis === 'empty',
+                      }"
+                    >
+                      {{ item.nilai }}
+                    </span>
+                  </button>
+                  <span class="wb-rare-count">{{ numberFormat(item.jumlah) }}</span>
+                </li>
+              </ul>
+            </template>
+          </template>
+        </section>
       </section>
 
       <section class="kartu wb-operations-card" aria-label="Operasi">
@@ -302,7 +449,7 @@
       </section>
     </div>
 
-    <div v-if="showSqlPanel || showSaveDialog" class="wb-backdrop" @click.self="closePanels" />
+    <div v-if="showSqlPanel || showSaveDialog || showExportDialog || showImportDialog || showMappingDialog" class="wb-backdrop" @click.self="closePanels" />
     <section
       v-if="showSqlPanel"
       class="kartu wb-dialog wb-sql-dialog"
@@ -445,6 +592,120 @@
         </form>
       </template>
     </section>
+
+    <section
+      v-if="showExportDialog"
+      class="kartu wb-dialog wb-export-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-export-title"
+      tabindex="-1"
+      @keydown="handleDialogKeydown"
+    >
+      <div class="wb-dialog-heading">
+        <h2 id="wb-export-title" class="card-title">Ekspor resep pipeline</h2>
+        <button class="wb-icon-button" type="button" @click="showExportDialog = false">Tutup</button>
+      </div>
+      <form class="wb-save-form" @submit.prevent="downloadRecipe">
+        <p class="wb-message">
+          File resep JSON hanya berisi definisi langkah dan opsi simpan. Tidak ada data baris atau kredensial di dalamnya.
+        </p>
+        <label for="wb-recipe-name">Nama resep</label>
+        <input id="wb-recipe-name" v-model="exportRecipeName" maxlength="120" required placeholder="Contoh: Standarisasi Data Pelanggan" />
+        <dl class="wb-summary">
+          <div><dt>Versi format</dt><dd>1</dd></div>
+          <div><dt>Saran sumber</dt><dd><code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> (tidak mengikat)</dd></div>
+          <div><dt>Jumlah langkah</dt><dd>{{ pipeline.steps.length }} langkah</dd></div>
+          <div><dt>Opsi simpan</dt><dd>{{ resultEngine }}, ORDER BY {{ orderBy[0] || '(tidak dipilih)' }}, nilai asli: {{ saveOriginal ? 'Ya' : 'Tidak' }}</dd></div>
+        </dl>
+        <p v-if="exportError" class="wb-error" role="alert">{{ exportError }}</p>
+        <div class="wb-dialog-actions">
+          <button class="wb-button wb-primary" type="submit" :disabled="!exportRecipeName.trim()">
+            Unduh file .json
+          </button>
+          <button class="wb-button" type="button" @click="showExportDialog = false">Batal</button>
+        </div>
+      </form>
+    </section>
+
+    <section
+      v-if="showImportDialog"
+      class="kartu wb-dialog wb-import-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-import-title"
+      tabindex="-1"
+      @keydown="handleDialogKeydown"
+    >
+      <div class="wb-dialog-heading">
+        <h2 id="wb-import-title" class="card-title">Impor resep pipeline</h2>
+        <button class="wb-icon-button" type="button" :disabled="importingRecipe" @click="showImportDialog = false">Tutup</button>
+      </div>
+      <div class="wb-save-form">
+        <p class="wb-message">
+          Pilih atau tarik file resep <code>.json</code> (maksimal 1 MB). Setiap langkah akan divalidasi ulang terhadap skema tabel sumber yang sedang dipilih.
+        </p>
+        <div
+          class="wb-dropzone"
+          :class="{ 'wb-dropzone-active': importDragActive }"
+          @dragover.prevent="importDragActive = true"
+          @dragleave.prevent="importDragActive = false"
+          @drop.prevent="handleRecipeDrop"
+        >
+          <p>{{ importingRecipe ? 'Memvalidasi resep di server...' : 'Tarik dan lepas file .json ke sini' }}</p>
+          <span>atau</span>
+          <label class="wb-button wb-small wb-file-label">
+            Pilih file JSON
+            <input
+              type="file"
+              accept=".json,application/json"
+              :disabled="importingRecipe"
+              @change="handleRecipeFileChange"
+            />
+          </label>
+        </div>
+        <p v-if="!sourceReady" class="wb-warning" role="status">
+          Belum ada tabel sumber yang dipilih. Langkah resep tetap dapat dimuat, lalu akan divalidasi saat Anda memilih database dan tabel.
+        </p>
+        <p v-if="importError" class="wb-error" role="alert">{{ importError }}</p>
+      </div>
+    </section>
+
+    <section
+      v-if="showMappingDialog"
+      class="kartu wb-dialog wb-mapping-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wb-mapping-title"
+      tabindex="-1"
+      @keydown="handleDialogKeydown"
+    >
+      <div class="wb-dialog-heading">
+        <h2 id="wb-mapping-title" class="card-title">Pemetaan kolom</h2>
+        <button class="wb-icon-button" type="button" @click="showMappingDialog = false">Tutup</button>
+      </div>
+      <form class="wb-save-form" @submit.prevent="applyColumnMapping">
+        <p class="wb-message">
+          Pilih kolom pengganti dari tabel <code>{{ pipeline.source.table }}</code> untuk kolom resep yang tidak ditemukan.
+        </p>
+        <div v-for="item in missingColumnReferences" :key="item.column" class="wb-mapping-row">
+          <div>
+            <strong><code>{{ item.column }}</code></strong>
+            <small>Dipakai di langkah {{ item.steps.join(', ') }}</small>
+          </div>
+          <select v-model="columnMappingDraft[item.column]" :aria-label="`Kolom pengganti untuk ${item.column}`">
+            <option value="">Biarkan tidak diubah</option>
+            <option v-for="col in sourceColumns" :key="col.name" :value="col.name">
+              {{ col.name }} ({{ col.type }})
+            </option>
+          </select>
+        </div>
+        <div class="wb-dialog-actions">
+          <button class="wb-button wb-primary" type="submit">Terapkan pemetaan</button>
+          <button class="wb-button" type="button" @click="showMappingDialog = false">Batal</button>
+        </div>
+      </form>
+    </section>
   </div>
 </template>
 
@@ -486,6 +747,42 @@ type ApplyResponse = {
   steps: number
   durationMs?: number
   verification?: string
+}
+type RareValueItem = {
+  nilai: string
+  jumlah: number
+  jenis: 'null' | 'empty' | 'text'
+  nilaiAsli: string | null
+}
+type RareValuesResponse = {
+  column: string
+  upTo: number
+  threshold: number
+  limit: number
+  items: RareValueItem[]
+  summary: {
+    uniqueValues: number
+    rareValues: number
+    affectedRows: number
+  }
+}
+type DisplayFilter = {
+  column: string
+  kind: 'null' | 'empty' | 'text'
+  value?: string | null
+  label: string
+}
+type ImportRecipeResponse = {
+  recipe: {
+    version: number
+    name: string
+    createdAt: string
+    suggestedSource: { database: string; table: string } | null
+    saveOptions: { engine: 'MergeTree' | 'ReplacingMergeTree'; orderBy: string[]; saveOriginal: boolean }
+  }
+  steps: WorkbenchStep[]
+  stepStatuses: Array<{ index: number; valid: boolean; error?: string; warnings?: string[] }>
+  summary: { total: number; valid: number; invalid: number }
 }
 
 const workbench = useWorkbench()
@@ -530,13 +827,36 @@ const activeColumnMenu = ref('')
 const showSqlPanel = ref(false)
 const showSaveDialog = ref(false)
 const resultTableName = ref('')
-const resultEngine = ref('MergeTree')
+const resultEngine = ref<'MergeTree' | 'ReplacingMergeTree'>('MergeTree')
 const orderBy = ref<string[]>([])
 const saveOriginal = ref(false)
 const applying = ref(false)
 const applyError = ref('')
 const applyResult = ref<ApplyResponse | null>(null)
 const masterColumns = ref<Column[]>([])
+
+const rareColumn = ref('')
+const rareThreshold = ref(10)
+const rareLimit = ref(100)
+const rareSearch = ref('')
+const rareExcludeNull = ref(false)
+const rareExcludeEmpty = ref(false)
+const rarePending = ref(false)
+const rareError = ref('')
+const rareResult = ref<RareValuesResponse | null>(null)
+const selectedRareKeys = ref<string[]>([])
+const displayFilter = ref<DisplayFilter | null>(null)
+
+const showExportDialog = ref(false)
+const exportRecipeName = ref('')
+const exportError = ref('')
+const showImportDialog = ref(false)
+const importDragActive = ref(false)
+const importingRecipe = ref(false)
+const importError = ref('')
+const importSummary = ref<{ name: string; valid: number; invalid: number; suggestedSourceNote: string } | null>(null)
+const showMappingDialog = ref(false)
+const columnMappingDraft = reactive<Record<string, string>>({})
 
 let previewController: AbortController | null = null
 let previewRequest = 0
@@ -589,6 +909,72 @@ const canOpenSave = computed(() => sourceReady.value
   && pipeline.value.steps.length > 0
   && stepStates.value.length === pipeline.value.steps.length
   && stepStates.value.every(({ status }) => status === 'valid'))
+
+const rareTextColumns = computed(() => visibleColumns.value.filter(isTextColumn))
+const selectedRareItems = computed(() => {
+  if (!rareResult.value) return []
+  const keySet = new Set(selectedRareKeys.value)
+  return rareResult.value.items.filter((item) => keySet.has(rareItemKey(item)))
+})
+const missingColumnReferences = computed(() => {
+  if (!sourceColumns.value.length || !pipeline.value.steps.length) return []
+  const known = new Set(sourceColumns.value.map((c) => c.name))
+  const missingMap = new Map<string, number[]>()
+
+  const checkCol = (colName: unknown, stepNumber: number) => {
+    if (typeof colName !== 'string' || !colName.trim()) return
+    if (!known.has(colName)) {
+      const list = missingMap.get(colName) ?? []
+      if (!list.includes(stepNumber)) list.push(stepNumber)
+      missingMap.set(colName, list)
+    }
+  }
+
+  pipeline.value.steps.forEach((step, idx) => {
+    const stepNumber = idx + 1
+    const p = step.params ?? {}
+    if (step.op === 'trim_text' || step.op === 'replace_values') {
+      checkCol(p.column, stepNumber)
+    } else if (step.op === 'add_column') {
+      if (p.kind === 'sequence') checkCol(p.orderColumn, stepNumber)
+      if (p.kind === 'combine' && Array.isArray(p.columns)) {
+        p.columns.forEach((col) => checkCol(col, stepNumber))
+      }
+      if (typeof p.name === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(p.name.trim())) {
+        known.add(p.name.trim())
+      }
+    } else if (step.op === 'deduplicate') {
+      if (Array.isArray(p.keyColumns)) p.keyColumns.forEach((col) => checkCol(col, stepNumber))
+      checkCol(p.orderColumn, stepNumber)
+      if (Array.isArray(p.completenessColumns)) p.completenessColumns.forEach((col) => checkCol(col, stepNumber))
+    } else if (step.op === 'conditional_rule' && Array.isArray(p.rules)) {
+      p.rules.forEach((rule: any) => {
+        if (!rule || typeof rule !== 'object') return
+        if (Array.isArray(rule.conditions)) {
+          rule.conditions.forEach((cond: any) => {
+            if (cond && typeof cond === 'object') checkCol(cond.column, stepNumber)
+          })
+        }
+        checkCol(rule.targetColumn, stepNumber)
+        if (rule.action === 'copy_column') checkCol(rule.sourceColumn, stepNumber)
+      })
+    } else if (step.op === 'extract_and_route') {
+      checkCol(p.sourceColumn, stepNumber)
+      if (p.createTarget === true) {
+        if (typeof p.newTargetName === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(p.newTargetName.trim())) {
+          known.add(p.newTargetName.trim())
+        }
+      } else {
+        checkCol(p.targetColumn, stepNumber)
+      }
+    } else if (step.op === 'fill_from_master') {
+      checkCol(p.sourceColumn, stepNumber)
+      checkCol(p.targetColumn, stepNumber)
+    }
+  })
+
+  return [...missingMap.entries()].map(([column, steps]) => ({ column, steps }))
+})
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object') {
@@ -736,12 +1122,20 @@ function changeDatabase(event: Event): void {
   workbench.setSource(database, '')
   tables.value = []
   sourceColumns.value = []
+  displayFilter.value = null
+  rareResult.value = null
+  selectedRareKeys.value = []
+  importSummary.value = null
   if (database) void loadTables(database)
 }
 
 function changeTable(event: Event): void {
   const table = (event.target as HTMLSelectElement).value
   workbench.setSource(pipeline.value.source.database, table)
+  displayFilter.value = null
+  rareResult.value = null
+  selectedRareKeys.value = []
+  importSummary.value = null
   void loadSourceColumns(pipeline.value.source.database, table)
 }
 
@@ -864,39 +1258,46 @@ async function refreshStepSchemas(): Promise<void> {
     return
   }
   const statuses: StepState[] = []
+  const validPrefix: WorkbenchStep[] = []
   for (let index = 0; index < steps.length; index += 1) {
     if (request !== schemaRequest) return
     stepStates.value = [...statuses, ...steps.slice(index).map(() => ({ status: 'loading' as const }))]
     try {
       const response = await $fetch<SchemaResponse>('/api/workbench/schema', {
         method: 'POST',
-        body: { source, steps: steps.slice(0, index + 1) },
+        body: { source, steps: [...validPrefix, steps[index]] },
       })
       if (request !== schemaRequest) return
       if (!response.valid) {
-        const message = response.error || 'Skema langkah tidak valid.'
-        statuses.push({ status: 'error', message })
-        for (let rest = index + 1; rest < steps.length; rest += 1) {
-          statuses.push({ status: 'error', message })
-        }
-        break
+        const rawMessage = response.error || 'Skema langkah tidak valid.'
+        const prefix = `Langkah ${validPrefix.length + 1}: `
+        const cleaned = rawMessage.startsWith(prefix) ? rawMessage.slice(prefix.length) : rawMessage
+        statuses.push({ status: 'error', message: `Langkah ${index + 1}: ${cleaned}` })
+        continue
       }
+      validPrefix.push(steps[index])
+      const stepWarnings = response.steps?.[validPrefix.length - 1]?.warnings ?? []
       statuses.push({
         status: 'valid',
         schema: response.schema ?? [],
-        warnings: response.steps?.[index]?.warnings?.map((warning) => `Langkah ${index + 1}: ${warning}`) ?? [],
+        warnings: stepWarnings.map((warning) => `Langkah ${index + 1}: ${warning}`),
       })
     } catch (error) {
       if (request !== schemaRequest) return
       const message = getErrorMessage(error, 'Skema langkah tidak dapat diperiksa.')
       statuses.push({ status: 'error', message })
-      for (let rest = index + 1; rest < steps.length; rest += 1) {
-        statuses.push({ status: 'error', message })
-      }
-      break
     }
   }
-  if (request === schemaRequest) stepStates.value = statuses
+  if (request === schemaRequest) {
+    stepStates.value = statuses
+    if (importSummary.value) {
+      importSummary.value = {
+        ...importSummary.value,
+        valid: statuses.filter((s) => s.status === 'valid').length,
+        invalid: statuses.filter((s) => s.status === 'error').length,
+      }
+    }
+  }
 }
 
 async function loadPreview(): Promise<void> {
@@ -918,10 +1319,23 @@ async function loadPreview(): Promise<void> {
   previewRows.value = []
   previewWarnings.value = []
   const steps = pipeline.value.steps.slice(0, selectedStep.value)
+  const activeFilter = displayFilter.value && visibleColumns.value.some((c) => c.name === displayFilter.value?.column)
+    ? {
+        column: displayFilter.value.column,
+        kind: displayFilter.value.kind,
+        ...(displayFilter.value.kind === 'text' ? { value: displayFilter.value.value ?? '' } : {}),
+      }
+    : undefined
   try {
     const response = await $fetch<PreviewResponse>('/api/workbench/preview', {
       method: 'POST',
-      body: { source: pipeline.value.source, steps, page: page.value, limit: limit.value },
+      body: {
+        source: pipeline.value.source,
+        steps,
+        page: page.value,
+        limit: limit.value,
+        ...(activeFilter ? { displayFilter: activeFilter } : {}),
+      },
       signal: controller.signal,
     })
     if (request !== previewRequest) return
@@ -1027,9 +1441,9 @@ function isTextColumn(column: Column): boolean {
 function openSaveDialog(): void {
   const sourceName = pipeline.value.source.table
   resultTableName.value = `${sourceName}_cleaned`.slice(0, 64)
-  resultEngine.value = 'MergeTree'
-  orderBy.value = []
-  saveOriginal.value = false
+  resultEngine.value = pipeline.value.saveOptions.engine
+  orderBy.value = [...pipeline.value.saveOptions.orderBy]
+  saveOriginal.value = pipeline.value.saveOptions.saveOriginal
   applyError.value = ''
   applyResult.value = null
   pipelineStatistics.value = null
@@ -1098,8 +1512,11 @@ async function viewResultTable(): Promise<void> {
 }
 
 function closePanels(): void {
-  if (!applying.value) {
+  if (!applying.value && !importingRecipe.value) {
     showSqlPanel.value = false
+    showExportDialog.value = false
+    showImportDialog.value = false
+    showMappingDialog.value = false
     closeSaveDialog()
   }
 }
@@ -1107,6 +1524,264 @@ function closePanels(): void {
 function closeSaveDialog(): void {
   if (applying.value) return
   showSaveDialog.value = false
+}
+
+function rareItemKey(item: RareValueItem): string {
+  return `${item.jenis}:${item.nilaiAsli ?? ''}`
+}
+
+function isRareItemFiltered(item: RareValueItem): boolean {
+  if (!displayFilter.value || !rareResult.value) return false
+  return displayFilter.value.column === rareResult.value.column
+    && displayFilter.value.kind === item.jenis
+    && (item.jenis !== 'text' || displayFilter.value.value === item.nilaiAsli)
+}
+
+function toggleRareDisplayFilter(item: RareValueItem): void {
+  if (!rareResult.value) return
+  if (isRareItemFiltered(item)) {
+    displayFilter.value = null
+  } else {
+    displayFilter.value = {
+      column: rareResult.value.column,
+      kind: item.jenis,
+      value: item.nilaiAsli,
+      label: item.nilai,
+    }
+  }
+  page.value = 1
+  void loadPreview()
+}
+
+function clearDisplayFilter(): void {
+  displayFilter.value = null
+  page.value = 1
+  void loadPreview()
+}
+
+async function loadRareValues(): Promise<void> {
+  if (!sourceReady.value || !rareColumn.value) return
+  rarePending.value = true
+  rareError.value = ''
+  selectedRareKeys.value = []
+  try {
+    rareResult.value = await $fetch<RareValuesResponse>('/api/workbench/rare-values', {
+      method: 'POST',
+      body: {
+        source: pipeline.value.source,
+        steps: pipeline.value.steps,
+        upTo: selectedStep.value,
+        column: rareColumn.value,
+        threshold: rareThreshold.value,
+        limit: rareLimit.value,
+        search: rareSearch.value,
+        excludeNull: rareExcludeNull.value,
+        excludeEmpty: rareExcludeEmpty.value,
+      },
+    })
+  } catch (error) {
+    rareResult.value = null
+    rareError.value = getErrorMessage(error, 'Nilai langka tidak dapat dianalisis.')
+  } finally {
+    rarePending.value = false
+  }
+}
+
+function createReplaceFromRare(): void {
+  const replaceOp = operations.value.find((op) => op.id === 'replace_values')
+  if (!replaceOp || !rareResult.value || selectedRareItems.value.length === 0) return
+
+  const seenOld = new Set<string>()
+  const pairs: Array<{ old: string; new: string }> = []
+  for (const item of selectedRareItems.value) {
+    const oldVal = item.nilaiAsli ?? ''
+    if (seenOld.has(oldVal)) continue
+    seenOld.add(oldVal)
+    pairs.push({ old: oldVal, new: '' })
+  }
+
+  selectedOperationId.value = replaceOp.id
+  editingStepIndex.value = null
+  insertAtIndex.value = selectedStep.value
+  prefilledColumn.value = ''
+  formInitialParams.value = {
+    column: rareResult.value.column,
+    pairs,
+    ignoreCase: false,
+    ignoreTrim: false,
+  }
+  formKey.value += 1
+}
+
+function openExportDialog(): void {
+  if (!sourceReady.value || pipeline.value.steps.length === 0) return
+  exportRecipeName.value = `Resep ${pipeline.value.source.table}`
+  exportError.value = ''
+  showExportDialog.value = true
+}
+
+function downloadRecipe(): void {
+  const name = exportRecipeName.value.trim()
+  if (!name) {
+    exportError.value = 'Nama resep wajib diisi.'
+    return
+  }
+  const payload = {
+    version: 1,
+    name,
+    createdAt: new Date().toISOString(),
+    suggestedSource: {
+      database: pipeline.value.source.database,
+      table: pipeline.value.source.table,
+    },
+    steps: pipeline.value.steps.map((step) => ({
+      op: step.op,
+      params: step.params,
+    })),
+    saveOptions: {
+      engine: resultEngine.value,
+      orderBy: [...orderBy.value],
+      saveOriginal: saveOriginal.value,
+    },
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resep-cleansing'
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${slug}.json`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  showExportDialog.value = false
+}
+
+function openImportDialog(): void {
+  importError.value = ''
+  importDragActive.value = false
+  showImportDialog.value = true
+}
+
+function handleRecipeDrop(event: DragEvent): void {
+  importDragActive.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) void processImportFile(file)
+}
+
+function handleRecipeFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) void processImportFile(file)
+}
+
+async function processImportFile(file: File): Promise<void> {
+  importError.value = ''
+  if (file.size > 1024 * 1024) {
+    importError.value = 'Ukuran file resep melebihi batas maksimal 1 MB.'
+    return
+  }
+  importingRecipe.value = true
+  try {
+    const rawJson = await file.text()
+    const response = await $fetch<ImportRecipeResponse>('/api/workbench/import-recipe', {
+      method: 'POST',
+      body: {
+        rawJson,
+        ...(sourceReady.value ? { source: pipeline.value.source } : {}),
+      },
+    })
+
+    pipeline.value.steps = response.steps
+    workbench.setSaveOptions(response.recipe.saveOptions)
+    resultEngine.value = response.recipe.saveOptions.engine
+    orderBy.value = [...response.recipe.saveOptions.orderBy]
+    saveOriginal.value = response.recipe.saveOptions.saveOriginal
+
+    selectedStep.value = response.steps.length > 0 && response.summary.invalid === 0 ? response.steps.length : 0
+    page.value = 1
+    displayFilter.value = null
+    rareResult.value = null
+    selectedRareKeys.value = []
+    resetOperationForm()
+    workbench.savePipeline()
+
+    const suggested = response.recipe.suggestedSource
+    const suggestedSourceNote = suggested && (suggested.database !== pipeline.value.source.database || suggested.table !== pipeline.value.source.table)
+      ? `Saran sumber resep: ${suggested.database}.${suggested.table} (hanya saran, tetap menggunakan tabel sumber saat ini).`
+      : ''
+
+    importSummary.value = {
+      name: response.recipe.name,
+      valid: response.summary.valid,
+      invalid: response.summary.invalid,
+      suggestedSourceNote,
+    }
+
+    showImportDialog.value = false
+    await refreshStepSchemas()
+    void loadPreview()
+  } catch (error) {
+    importError.value = getErrorMessage(error, 'File resep tidak dapat diimpor.')
+  } finally {
+    importingRecipe.value = false
+  }
+}
+
+function openMappingDialog(): void {
+  for (const key of Object.keys(columnMappingDraft)) delete columnMappingDraft[key]
+  for (const item of missingColumnReferences.value) {
+    columnMappingDraft[item.column] = ''
+  }
+  showMappingDialog.value = true
+}
+
+function applyColumnMapping(): void {
+  const map = new Map<string, string>()
+  for (const item of missingColumnReferences.value) {
+    const replacement = columnMappingDraft[item.column]
+    if (replacement) map.set(item.column, replacement)
+  }
+  if (map.size === 0) {
+    showMappingDialog.value = false
+    return
+  }
+
+  const remap = (val: unknown): unknown => (typeof val === 'string' && map.has(val) ? map.get(val) : val)
+  pipeline.value.steps = pipeline.value.steps.map((step) => {
+    const p = { ...step.params }
+    if (step.op === 'trim_text' || step.op === 'replace_values') {
+      p.column = remap(p.column)
+    } else if (step.op === 'add_column') {
+      if (p.kind === 'sequence') p.orderColumn = remap(p.orderColumn)
+      if (p.kind === 'combine' && Array.isArray(p.columns)) p.columns = p.columns.map(remap)
+    } else if (step.op === 'deduplicate') {
+      if (Array.isArray(p.keyColumns)) p.keyColumns = p.keyColumns.map(remap)
+      if (p.orderColumn) p.orderColumn = remap(p.orderColumn)
+      if (Array.isArray(p.completenessColumns)) p.completenessColumns = p.completenessColumns.map(remap)
+    } else if (step.op === 'conditional_rule' && Array.isArray(p.rules)) {
+      p.rules = p.rules.map((rule: any) => ({
+        ...rule,
+        targetColumn: remap(rule.targetColumn),
+        sourceColumn: rule.action === 'copy_column' ? remap(rule.sourceColumn) : rule.sourceColumn,
+        conditions: Array.isArray(rule.conditions)
+          ? rule.conditions.map((cond: any) => ({ ...cond, column: remap(cond.column) }))
+          : rule.conditions,
+      }))
+    } else if (step.op === 'extract_and_route') {
+      p.sourceColumn = remap(p.sourceColumn)
+      if (p.createTarget !== true) p.targetColumn = remap(p.targetColumn)
+    } else if (step.op === 'fill_from_master') {
+      p.sourceColumn = remap(p.sourceColumn)
+      p.targetColumn = remap(p.targetColumn)
+    }
+    return { ...step, params: p }
+  })
+
+  workbench.savePipeline()
+  showMappingDialog.value = false
+  void refreshStepSchemas()
 }
 
 function handleDialogKeydown(event: KeyboardEvent): void {
@@ -1135,18 +1810,51 @@ function handleDialogKeydown(event: KeyboardEvent): void {
   }
 }
 
-watch([showSqlPanel, showSaveDialog], async ([sqlOpen, saveOpen], [wasSqlOpen, wasSaveOpen]) => {
-  if (sqlOpen || saveOpen) {
-    if (!wasSqlOpen && !wasSaveOpen) {
+watch([showSqlPanel, showSaveDialog, showExportDialog, showImportDialog, showMappingDialog], async (next, prev) => {
+  const anyOpen = next.some(Boolean)
+  const wasAnyOpen = prev.some(Boolean)
+  if (anyOpen) {
+    if (!wasAnyOpen) {
       returnFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
     }
     await nextTick()
-    const dialog = document.querySelector<HTMLElement>(saveOpen ? '.wb-save-dialog' : '.wb-sql-dialog')
-    const initialFocus = dialog?.querySelector<HTMLElement>('button:not(:disabled)')
+    const selector = next[1]
+      ? '.wb-save-dialog'
+      : next[2]
+        ? '.wb-export-dialog'
+        : next[3]
+          ? '.wb-import-dialog'
+          : next[4]
+            ? '.wb-mapping-dialog'
+            : '.wb-sql-dialog'
+    const dialog = document.querySelector<HTMLElement>(selector)
+    const initialFocus = dialog?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled)')
     ;(initialFocus ?? dialog)?.focus()
-  } else if (wasSqlOpen || wasSaveOpen) {
+  } else if (wasAnyOpen) {
     returnFocusElement?.focus()
     returnFocusElement = null
+  }
+})
+
+watch([resultEngine, orderBy, saveOriginal], ([engine, nextOrderBy, nextSaveOriginal]) => {
+  workbench.setSaveOptions({
+    engine,
+    orderBy: [...nextOrderBy],
+    saveOriginal: nextSaveOriginal,
+  })
+}, { deep: true })
+
+watch(rareTextColumns, (cols) => {
+  if (!cols.some((c) => c.name === rareColumn.value)) {
+    rareColumn.value = cols[0]?.name ?? ''
+    rareResult.value = null
+    selectedRareKeys.value = []
+  }
+})
+
+watch(visibleColumns, (cols) => {
+  if (displayFilter.value && !cols.some((c) => c.name === displayFilter.value?.column)) {
+    displayFilter.value = null
   }
 })
 
@@ -1155,6 +1863,8 @@ watch(
   () => {
     page.value = 1
     statistics.value = null
+    rareResult.value = null
+    selectedRareKeys.value = []
     workbench.savePipeline()
     void refreshStepSchemas()
     if (pipeline.value.source.database && pipeline.value.source.table) {
@@ -1169,6 +1879,11 @@ watch([selectedStep, page, limit], () => {
   void loadPreview()
 })
 
+watch(selectedStep, () => {
+  rareResult.value = null
+  selectedRareKeys.value = []
+})
+
 watch(
   () => pipeline.value.source.database,
   (database) => {
@@ -1179,6 +1894,9 @@ watch(
 
 onMounted(async () => {
   workbench.initialize()
+  resultEngine.value = pipeline.value.saveOptions.engine
+  orderBy.value = [...pipeline.value.saveOptions.orderBy]
+  saveOriginal.value = pipeline.value.saveOptions.saveOriginal
   await Promise.all([loadDatabases(), loadOperations()])
   if (pipeline.value.source.database) await loadTables(pipeline.value.source.database)
   if (pipeline.value.source.database && pipeline.value.source.table) {
@@ -1974,6 +2692,280 @@ onMounted(async () => {
 
   .wb-pagination {
     flex-direction: column;
+  }
+}
+
+.wb-recipe-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wb-import-summary {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  background: #f5f9fd;
+  font-size: 12px;
+}
+
+.wb-import-summary p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.wb-import-note {
+  color: var(--warna-redup);
+}
+
+.wb-import-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-filter-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #b8d3ec;
+  border-radius: 9px;
+  color: #263a4e;
+  background: #edf5fc;
+  font-size: 12px;
+}
+
+.wb-filter-chip span {
+  overflow-wrap: anywhere;
+}
+
+.wb-rare-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--warna-garis);
+}
+
+.wb-rare-heading h3 {
+  margin: 0;
+  color: #263a4e;
+  font-size: 15px;
+}
+
+.wb-rare-heading p {
+  margin: 3px 0 0;
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-rare-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.wb-rare-controls > label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #40566d;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-rare-controls select,
+.wb-rare-controls input[type='number'],
+.wb-rare-controls input[type='text'] {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.wb-rare-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.wb-rare-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #40566d;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-rare-summary {
+  margin: 0;
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-rare-summary strong {
+  color: #263a4e;
+}
+
+.wb-rare-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #f5f9fd;
+  font-size: 12px;
+}
+
+.wb-rare-bulk > div {
+  display: flex;
+  gap: 6px;
+}
+
+.wb-rare-list {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.wb-rare-list li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+
+.wb-rare-list li:hover {
+  background: #f5f9fd;
+}
+
+.wb-rare-item-active {
+  background: #e6f1fa;
+}
+
+.wb-rare-value-btn {
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  color: var(--warna-teks);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-rare-count {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #375875;
+  background: var(--warna-biru-muda);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.wb-dropzone {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 2px dashed var(--warna-garis);
+  border-radius: 12px;
+  background: #f8fbfe;
+  text-align: center;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.wb-dropzone p,
+.wb-dropzone span {
+  margin: 0;
+  color: var(--warna-redup);
+  font-size: 13px;
+}
+
+.wb-dropzone-active {
+  border-color: var(--warna-utama);
+  background: #eaf4fc;
+}
+
+.wb-file-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.wb-file-label input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wb-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+}
+
+.wb-mapping-row small {
+  display: block;
+  color: var(--warna-redup);
+  font-size: 11px;
+}
+
+.wb-mapping-row select {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+@media (max-width: 620px) {
+  .wb-rare-controls,
+  .wb-mapping-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

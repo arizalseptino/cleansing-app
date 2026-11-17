@@ -110,13 +110,11 @@ export async function getTableColumns(client: ReturnType<typeof useClickHouse>, 
 }
 
 export function isTextType(type: string): boolean {
-  const normalized = type.trim()
+  let normalized = type.trim()
+  while (/^(Nullable|LowCardinality)\s*\((.*)\)$/.test(normalized)) {
+    normalized = normalized.replace(/^(Nullable|LowCardinality)\s*\((.*)\)$/, '$2').trim()
+  }
   return normalized === 'String'
-    || normalized === 'Nullable(String)'
-    || normalized === 'LowCardinality(String)'
-    || normalized === 'Nullable(LowCardinality(String))'
-    || normalized.startsWith('LowCardinality(String)')
-    || normalized.startsWith('Nullable(LowCardinality(String))')
 }
 
 export function ensureColumnExists(schema: ColumnMetadata[], column: string, label: string): string {

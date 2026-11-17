@@ -9,18 +9,34 @@ export type WorkbenchStep = {
   params: Record<string, unknown>
 }
 
+export type WorkbenchSaveOptions = {
+  engine: 'MergeTree' | 'ReplacingMergeTree'
+  orderBy: string[]
+  saveOriginal: boolean
+}
+
 type StoredPipeline = {
   source: WorkbenchSource
   steps: WorkbenchStep[]
+  saveOptions: WorkbenchSaveOptions
 }
 
 const storageKey = 'bersihdata-workbench-v1'
+
+function defaultSaveOptions(): WorkbenchSaveOptions {
+  return {
+    engine: 'MergeTree',
+    orderBy: [],
+    saveOriginal: false,
+  }
+}
 
 export function useWorkbench() {
   const selectedSource = useSelectedSource()
   const pipeline = useState<StoredPipeline>('workbench-pipeline', () => ({
     source: { database: '', table: '' },
     steps: [],
+    saveOptions: defaultSaveOptions(),
   }))
   const selectedStep = useState<number>('workbench-selected-step', () => 0)
   const page = useState<number>('workbench-page', () => 1)
@@ -48,6 +64,7 @@ export function useWorkbench() {
       if (database && (database !== pipeline.value.source.database || table !== pipeline.value.source.table)) {
         pipeline.value.source = { database, table }
         pipeline.value.steps = []
+        pipeline.value.saveOptions = defaultSaveOptions()
         selectedStep.value = 0
         page.value = 1
         persist()
@@ -62,6 +79,14 @@ export function useWorkbench() {
         const parsed = JSON.parse(saved) as Partial<StoredPipeline>
         if (parsed.source && typeof parsed.source.database === 'string'
           && typeof parsed.source.table === 'string' && Array.isArray(parsed.steps)) {
+          const rawSave = parsed.saveOptions
+          const saveOptions: WorkbenchSaveOptions = rawSave && typeof rawSave === 'object'
+            ? {
+                engine: rawSave.engine === 'ReplacingMergeTree' ? 'ReplacingMergeTree' : 'MergeTree',
+                orderBy: Array.isArray(rawSave.orderBy) ? rawSave.orderBy.filter((c): c is string => typeof c === 'string').slice(0, 1) : [],
+                saveOriginal: Boolean(rawSave.saveOriginal),
+              }
+            : defaultSaveOptions()
           pipeline.value = {
             source: {
               database: parsed.source.database,
@@ -71,6 +96,7 @@ export function useWorkbench() {
               Boolean(step && typeof step.id === 'string' && typeof step.op === 'string'
                 && step.params && typeof step.params === 'object' && !Array.isArray(step.params)),
             ),
+            saveOptions,
           }
           restored = true
         }
@@ -104,8 +130,18 @@ export function useWorkbench() {
     selectedSource.setTable(table || null)
     if (changed) {
       pipeline.value.steps = []
+      pipeline.value.saveOptions = defaultSaveOptions()
       selectedStep.value = 0
       page.value = 1
+    }
+    persist()
+  }
+
+  function setSaveOptions(options: Partial<WorkbenchSaveOptions>): void {
+    pipeline.value.saveOptions = {
+      engine: options.engine === 'ReplacingMergeTree' ? 'ReplacingMergeTree' : (options.engine ?? pipeline.value.saveOptions.engine),
+      orderBy: Array.isArray(options.orderBy) ? options.orderBy.slice(0, 1) : pipeline.value.saveOptions.orderBy,
+      saveOriginal: typeof options.saveOriginal === 'boolean' ? options.saveOriginal : pipeline.value.saveOptions.saveOriginal,
     }
     persist()
   }
@@ -122,6 +158,7 @@ export function useWorkbench() {
     persistenceError,
     initialize,
     setSource,
+    setSaveOptions,
     savePipeline,
   }
 }

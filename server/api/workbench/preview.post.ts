@@ -1,4 +1,11 @@
 import { compilePipeline } from '../../workbench/compiler'
+import { quoteIdentifier } from '../../workbench/utils'
+
+type DisplayFilter = {
+  column: string
+  kind: 'null' | 'empty' | 'text'
+  value?: string | null
+}
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -21,9 +28,42 @@ export default defineEventHandler(async (event) => {
   }
   const page = requestedPage
 
+  let previewSql = compiled.sql
+  const previewParams: Record<string, unknown> = { ...compiled.params }
+
+  if (body.displayFilter !== undefined && body.displayFilter !== null) {
+    const rawFilter = body.displayFilter as Partial<DisplayFilter>
+    if (typeof rawFilter !== 'object' || Array.isArray(rawFilter)) {
+      throw createError({ statusCode: 400, statusMessage: 'Penyaring tampilan tidak valid', message: 'Format penyaring tampilan tidak valid.' })
+    }
+    const filterColumn = typeof rawFilter.column === 'string' ? rawFilter.column : ''
+    const filterKind = rawFilter.kind
+    if (!filterColumn || (filterKind !== 'null' && filterKind !== 'empty' && filterKind !== 'text')) {
+      throw createError({ statusCode: 400, statusMessage: 'Penyaring tampilan tidak valid', message: 'Kolom dan jenis penyaring tampilan wajib diisi.' })
+    }
+    const verifiedColumn = compiled.schema.find((col) => col.name === filterColumn)
+    if (!verifiedColumn) {
+      throw createError({ statusCode: 400, statusMessage: 'Kolom penyaring tidak ditemukan', message: `Kolom "${filterColumn}" tidak ditemukan pada skema pratinjau.` })
+    }
+    const quoted = quoteIdentifier(verifiedColumn.name)
+    let condition = ''
+    if (filterKind === 'null') {
+      condition = `isNull(${quoted})`
+    } else if (filterKind === 'empty') {
+      condition = `(NOT isNull(${quoted}) AND toString(${quoted}) = '')`
+    } else {
+      if (typeof rawFilter.value !== 'string' || rawFilter.value.length > 2000) {
+        throw createError({ statusCode: 400, statusMessage: 'Nilai penyaring tidak valid', message: 'Nilai penyaring tampilan harus berupa teks maksimal 2.000 karakter.' })
+      }
+      previewParams.wb_display_filter_val = rawFilter.value
+      condition = `(NOT isNull(${quoted}) AND toString(${quoted}) = {wb_display_filter_val:String})`
+    }
+    previewSql = `SELECT * FROM (${compiled.sql}) WHERE ${condition}`
+  }
+
   const totalRows = await client.query({
-    query: `SELECT count() AS total FROM (${compiled.sql})`,
-    query_params: compiled.params,
+    query: `SELECT count() AS total FROM (${previewSql})`,
+    query_params: previewParams,
     format: 'JSONEachRow',
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })
@@ -36,8 +76,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const rowsResult = await client.query({
-    query: `SELECT * FROM (${compiled.sql}) LIMIT ${limit} OFFSET ${offset}`,
-    query_params: compiled.params,
+    query: `SELECT * FROM (${previewSql}) LIMIT ${limit} OFFSET ${offset}`,
+    query_params: previewParams,
     format: 'JSON',
     clickhouse_settings: { readonly: 1, max_execution_time: 30 },
   })
