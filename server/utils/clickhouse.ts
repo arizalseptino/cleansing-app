@@ -8,12 +8,23 @@ export type ClickHouseLikeClient = {
     query_params?: Record<string, unknown>
     format?: string
     clickhouse_settings?: Record<string, unknown>
+    abort_signal?: AbortSignal
+    query_id?: string
   }) => Promise<{ json: <T = unknown>() => Promise<T> }>
   command: (params: {
     query: string
     query_params?: Record<string, unknown>
     clickhouse_settings?: Record<string, unknown>
+    abort_signal?: AbortSignal
+    query_id?: string
   }) => Promise<unknown>
+  exec: (params: {
+    query: string
+    query_params?: Record<string, unknown>
+    clickhouse_settings?: Record<string, unknown>
+    abort_signal?: AbortSignal
+    query_id?: string
+  }) => Promise<{ stream: Readable; query_id: string }>
   insert: (params: {
     table: string
     values: Readable | Buffer | string

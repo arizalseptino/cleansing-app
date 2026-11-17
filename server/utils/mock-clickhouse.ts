@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { Readable } from 'node:stream'
+import { Readable } from 'node:stream'
 import Papa from 'papaparse'
 
 export type MockColumn = {
@@ -21,12 +21,24 @@ type QueryInput = {
   query_params?: Record<string, unknown>
   format?: string
   clickhouse_settings?: Record<string, unknown>
+  abort_signal?: AbortSignal
+  query_id?: string
 }
 
 type CommandInput = {
   query: string
   query_params?: Record<string, unknown>
   clickhouse_settings?: Record<string, unknown>
+  abort_signal?: AbortSignal
+  query_id?: string
+}
+
+type ExecInput = {
+  query: string
+  query_params?: Record<string, unknown>
+  clickhouse_settings?: Record<string, unknown>
+  abort_signal?: AbortSignal
+  query_id?: string
 }
 
 type InsertInput = {
@@ -1043,6 +1055,8 @@ function editDistanceUtf8(rawA: string, rawB: string): number {
 export class MockClickHouseClient {
   private databases = createInitialDatabases()
   private rowScopes = new WeakMap<Record<string, unknown>, Map<string, Record<string, unknown>>>()
+  private projectedSourceFallback = new WeakMap<Record<string, unknown>, Record<string, unknown>>()
+  private activeQueries = new Map<string, AbortController>()
 
   private getSystemRows(table: string): Record<string, unknown>[] {
     if (table === 'databases') {
@@ -1124,14 +1138,17 @@ export class MockClickHouseClient {
     switch (expr.kind) {
       case 'literal':
         return expr.value
-      case 'ident':
+      case 'ident': {
         if (expr.qualifier) {
           const scoped = this.rowScopes.get(row)?.get(expr.qualifier)
           if (scoped && expr.name in scoped) return scoped[expr.name]
         }
         if (expr.name in row) return row[expr.name]
+        const sourceRow = this.projectedSourceFallback.get(row)
+        if (sourceRow && expr.name in sourceRow) return sourceRow[expr.name]
         if (ctes.has(expr.name)) return ctes.get(expr.name)
         return undefined
+      }
       case 'array':
         return expr.items.map((item) => this.evalExpr(item, row, ctes))
       case 'tuple':
@@ -1742,6 +1759,7 @@ export class MockClickHouseClient {
         }
       }
       builtColumns = true
+      this.projectedSourceFallback.set(outRow, r)
       return outRow
     }
 
@@ -1829,6 +1847,39 @@ export class MockClickHouseClient {
   }
 
   async query<T = unknown>({ query, query_params = {}, format }: QueryInput): Promise<{ json: <R = T>() => Promise<R> }> {
+    const trimmed = query.trim()
+    if (/^SHOW\s+CREATE\s+TABLE\s+/i.test(trimmed)) {
+      const tokens = tokenize(trimmed.slice(trimmed.search(/\bTABLE\b/i) + 5))
+      let database = 'default'
+      let table = ''
+      if (tokens.length >= 3 && tokens[1]?.type === 'punct' && tokens[1].value === '.') {
+        database = tokens[0]?.type === 'ident' ? tokens[0].value : 'default'
+        table = tokens[2]?.type === 'ident' ? tokens[2].value : ''
+      } else if (tokens[0]?.type === 'ident') {
+        table = tokens[0].value
+      }
+      const tbl = this.databases.get(database)?.get(table)
+      if (!tbl) {
+        throw new Error(`Table ${database}.${table} does not exist`)
+      }
+      const colsSql = tbl.columns.map((c) => `    ${quoteMockIdent(c.name)} ${c.type}`).join(',\n')
+      const orderExpr = tbl.sorting_key && !/^tuple\(\)$/i.test(tbl.sorting_key.trim())
+        ? tbl.sorting_key
+        : 'tuple()'
+      const statement = `CREATE TABLE ${quoteMockIdent(database)}.${quoteMockIdent(tbl.name)}\n(\n${colsSql}\n)\nENGINE = ${tbl.engine}\nORDER BY ${orderExpr}`
+      return {
+        json: async <R = T>() => {
+          if (format === 'JSON') {
+            return {
+              meta: [{ name: 'statement', type: 'String' }],
+              data: [{ statement }],
+            } as unknown as R
+          }
+          return [{ statement }] as unknown as R
+        },
+      }
+    }
+
     const tokens = tokenize(query)
     const parser = new SqlParser(tokens, query_params)
     const ast = parser.parseQuery()
@@ -1847,8 +1898,106 @@ export class MockClickHouseClient {
     }
   }
 
+  async exec({ query, query_params = {}, clickhouse_settings = {}, abort_signal, query_id }: ExecInput): Promise<{ stream: Readable; query_id: string }> {
+    const qid = query_id || randomUUID()
+    if (abort_signal?.aborted) {
+      throw new Error('Query aborted before execution')
+    }
+
+    const formatMatch = /\s+FORMAT\s+([A-Za-z0-9_]+)\s*;?\s*$/i.exec(query)
+    const outFormat = formatMatch?.[1] ?? 'CSVWithNames'
+    const sqlQuery = formatMatch ? query.slice(0, formatMatch.index) : query
+
+    if (outFormat !== 'CSV' && outFormat !== 'CSVWithNames' && outFormat !== 'SQLInsert') {
+      throw new Error(`Unsupported mock exec format: ${outFormat}`)
+    }
+
+    const tokens = tokenize(sqlQuery)
+    const parser = new SqlParser(tokens, query_params)
+    const ast = parser.parseQuery()
+    const result = this.evalQuery(ast)
+
+    const controller = new AbortController()
+    const onAbort = () => controller.abort()
+    abort_signal?.addEventListener('abort', onAbort, { once: true })
+    this.activeQueries.set(qid, controller)
+
+    const activeQueries = this.activeQueries
+    const cols = result.columns
+
+    const delimiter = typeof clickhouse_settings.format_csv_delimiter === 'string' && clickhouse_settings.format_csv_delimiter.length === 1
+      ? clickhouse_settings.format_csv_delimiter
+      : ','
+    const nullRep = clickhouse_settings.format_csv_null_representation !== undefined
+      ? String(clickhouse_settings.format_csv_null_representation)
+      : '\\N'
+
+    const sqlTableName = typeof clickhouse_settings.output_format_sql_insert_table_name === 'string' && clickhouse_settings.output_format_sql_insert_table_name
+      ? clickhouse_settings.output_format_sql_insert_table_name
+      : 'table'
+    const sqlIncludeCols = Number(clickhouse_settings.output_format_sql_insert_include_column_names ?? 1) !== 0
+    const sqlQuoteNames = Number(clickhouse_settings.output_format_sql_insert_quote_names ?? 1) !== 0
+    const sqlBatchSize = Math.max(1, Number(clickhouse_settings.output_format_sql_insert_max_batch_size ?? 1000) || 1000)
+
+    async function* generateChunks(): AsyncGenerator<Buffer> {
+      try {
+        if (outFormat === 'CSV' || outFormat === 'CSVWithNames') {
+          if (outFormat === 'CSVWithNames') {
+            if (controller.signal.aborted) throw new Error('Query was cancelled')
+            const headerLine = `${cols.map((c) => formatMockCsvCell(c.name, delimiter, nullRep)).join(delimiter)}\n`
+            yield Buffer.from(headerLine, 'utf8')
+          }
+          const chunkRows = 25
+          for (let i = 0; i < result.rows.length; i += chunkRows) {
+            if (controller.signal.aborted) throw new Error('Query was cancelled')
+            const slice = result.rows.slice(i, i + chunkRows)
+            let text = ''
+            for (const row of slice) {
+              text += `${cols.map((c) => formatMockCsvCell(row[c.name], delimiter, nullRep)).join(delimiter)}\n`
+            }
+            yield Buffer.from(text, 'utf8')
+            await new Promise((resolve) => setImmediate(resolve))
+          }
+          return
+        }
+
+        const formattedTable = sqlQuoteNames ? quoteMockIdent(sqlTableName) : sqlTableName
+        const colList = sqlIncludeCols
+          ? ` (${cols.map((c) => (sqlQuoteNames ? quoteMockIdent(c.name) : c.name)).join(', ')})`
+          : ''
+
+        for (let i = 0; i < result.rows.length; i += sqlBatchSize) {
+          if (controller.signal.aborted) throw new Error('Query was cancelled')
+          const batch = result.rows.slice(i, i + sqlBatchSize)
+          const tuples = batch
+            .map((row) => `(${cols.map((c) => formatMockSqlValue(row[c.name])).join(', ')})`)
+            .join(', ')
+          yield Buffer.from(`INSERT INTO ${formattedTable}${colList} VALUES ${tuples};\n`, 'utf8')
+          await new Promise((resolve) => setImmediate(resolve))
+        }
+      } finally {
+        abort_signal?.removeEventListener('abort', onAbort)
+        activeQueries.delete(qid)
+      }
+    }
+
+    return {
+      stream: Readable.from(generateChunks()),
+      query_id: qid,
+    }
+  }
+
   async command({ query, query_params = {} }: CommandInput): Promise<void> {
     const trimmed = query.trim()
+
+    if (/^KILL\s+QUERY/i.test(trimmed)) {
+      const paramMatch = /\{([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(trimmed)
+      const qid = paramMatch ? String(query_params[paramMatch[1]] ?? '') : ''
+      if (qid && this.activeQueries.has(qid)) {
+        this.activeQueries.get(qid)?.abort()
+      }
+      return
+    }
 
     if (/^CREATE\s+DATABASE/i.test(trimmed)) {
       const tokens = tokenize(trimmed)
@@ -2096,6 +2245,38 @@ function splitTopLevelComma(str: string): string[] {
   const tail = str.slice(start).trim()
   if (tail) parts.push(tail)
   return parts
+}
+
+function quoteMockIdent(name: string): string {
+  return `\`${name.replace(/\\/g, '\\\\').replace(/`/g, '\\`')}\``
+}
+
+function formatMockCsvCell(value: unknown, delimiter: string, nullRep: string): string {
+  if (value === null || value === undefined) {
+    return nullRep
+  }
+  const str = typeof value === 'object' ? (JSON.stringify(value) ?? '') : String(value)
+  if (str === '') {
+    return '""'
+  }
+  if (str.includes(delimiter) || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+    return `"${str.replace(/"/g, '""')}"`
+  }
+  return str
+}
+
+function formatMockSqlValue(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL'
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL'
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  const str = typeof value === 'object' ? (JSON.stringify(value) ?? '') : String(value)
+  const escaped = str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\0/g, '\\0')
+  return `'${escaped}'`
 }
 
 let mockClientInstance: MockClickHouseClient | null = null

@@ -53,7 +53,10 @@
                   <td>
                     <span class="history-table-name">{{ entry.database_sumber }}.{{ entry.tabel_sumber }}</span>
                     <span class="history-arrow" aria-hidden="true">→</span>
-                    <span class="history-table-name">{{ entry.database_sumber }}.{{ entry.tabel_hasil || '—' }}</span>
+                    <span v-if="entry.fitur_id === 'export'" class="history-table-name">
+                      {{ exportSummaryText(entry.parameter) }}
+                    </span>
+                    <span v-else class="history-table-name">{{ entry.database_sumber }}.{{ entry.tabel_hasil || '—' }}</span>
                   </td>
                   <td>{{ formatNumber(entry.baris_terisi) }}</td>
                   <td>
@@ -74,12 +77,20 @@
                       {{ expandedEntryId === entry.id ? 'Tutup detail' : 'Parameter' }}
                     </button>
                     <button
-                      v-if="entry.status === 'sukses'"
+                      v-if="entry.status === 'sukses' && Boolean(entry.tabel_hasil)"
                       class="history-text-button"
                       type="button"
                       @click="viewResult(entry)"
                     >
                       Lihat tabel hasil
+                    </button>
+                    <button
+                      v-if="entry.status === 'sukses' && Boolean(entry.tabel_hasil)"
+                      class="history-text-button"
+                      type="button"
+                      @click="openExportResult(entry)"
+                    >
+                      Ekspor
                     </button>
                   </td>
                 </tr>
@@ -106,6 +117,9 @@
                       </template>
                       <template v-else-if="entry.fitur_id === 'ingest'">
                         {{ formatNumber(entry.baris_terisi) }} baris dimuat ·
+                      </template>
+                      <template v-else-if="entry.fitur_id === 'export'">
+                        {{ formatNumber(entry.baris_terisi) }} baris diekspor ·
                       </template>
                       <template v-else>
                         {{ formatNumber(entry.baris_ambigu) }} baris ambigu dibiarkan kosong ·
@@ -135,6 +149,13 @@
       </template>
       <p v-else class="history-message" role="status">Belum ada riwayat penerapan cleansing.</p>
     </section>
+
+    <ExportDialog
+      :open="Boolean(exportTarget)"
+      :database="exportTarget?.database ?? ''"
+      :table="exportTarget?.table ?? ''"
+      @close="exportTarget = null"
+    />
   </div>
 </template>
 
@@ -173,6 +194,7 @@ const pending = ref(true)
 const errorMessage = ref('')
 const featureNamesError = ref('')
 const expandedEntryId = ref<string | null>(null)
+const exportTarget = ref<{ database: string; table: string } | null>(null)
 let requestId = 0
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
@@ -229,7 +251,19 @@ async function loadFeatureNames() {
 function featureName(id: string): string {
   if (id === 'workbench') return 'Ruang kerja cleansing'
   if (id === 'ingest') return 'Muat data baru'
+  if (id === 'export') return 'Ekspor data'
   return featureNames.value[id] ?? id
+}
+
+function exportSummaryText(rawParams: string): string {
+  try {
+    const parsed = JSON.parse(rawParams) as Record<string, unknown>
+    const fmt = typeof parsed.format === 'string' ? parsed.format.toUpperCase() : 'Berkas'
+    const file = typeof parsed.filename === 'string' && parsed.filename ? ` (${parsed.filename})` : ''
+    return `Ekspor ${fmt}${file}`
+  } catch {
+    return 'Ekspor berkas'
+  }
 }
 
 function workbenchHistorySteps(value: string): WorkbenchHistoryStep[] {
@@ -303,6 +337,14 @@ async function viewResult(entry: HistoryEntry) {
   source.setDatabase(entry.database_sumber)
   source.setTable(entry.tabel_hasil)
   await navigateTo('/sumber-data')
+}
+
+function openExportResult(entry: HistoryEntry) {
+  if (!entry.tabel_hasil) return
+  exportTarget.value = {
+    database: entry.database_sumber,
+    table: entry.tabel_hasil,
+  }
 }
 
 onMounted(() => {

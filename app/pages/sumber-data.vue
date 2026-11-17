@@ -130,7 +130,17 @@
           <p class="page-kicker">Pratinjau data</p>
           <h2 class="card-title">Isi tabel</h2>
         </div>
-        <code v-if="selectedTable">{{ selectedTable }}</code>
+        <div class="rows-heading-actions">
+          <code v-if="selectedTable">{{ selectedTable }}</code>
+          <button
+            type="button"
+            class="ingest-secondary-btn rows-export-btn"
+            :disabled="!selectedDatabase || !selectedTable"
+            @click="openTableExportDialog"
+          >
+            Ekspor
+          </button>
+        </div>
       </div>
 
       <p v-if="!selectedDatabase || !selectedTable" class="source-message">
@@ -526,6 +536,13 @@
         </template>
       </template>
     </section>
+
+    <ExportDialog
+      :open="showTableExportDialog"
+      :database="selectedDatabase ?? ''"
+      :table="selectedTable ?? ''"
+      @close="showTableExportDialog = false"
+    />
   </div>
 </template>
 
@@ -581,7 +598,13 @@ const pageSize = ref(50)
 const rowsPending = ref(false)
 const rowsError = ref('')
 const orderGuaranteed = ref(true)
+const showTableExportDialog = ref(false)
 let rowRequestId = 0
+
+function openTableExportDialog() {
+  if (!selectedDatabase.value || !selectedTable.value) return
+  showTableExportDialog.value = true
+}
 
 const totalPages = computed(() => Math.max(1, Math.ceil(rowCount.value / pageSize.value)))
 const rowsRange = computed(() => {
@@ -1137,12 +1160,25 @@ onMounted(loadDatabases)
   margin: 0;
 }
 
+.rows-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .rows-heading code {
-  max-width: 50%;
+  max-width: 320px;
   overflow: hidden;
   color: #375875;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.rows-export-btn {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .rows-order-note {

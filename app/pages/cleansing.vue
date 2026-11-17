@@ -570,7 +570,10 @@
           <div><dt>Durasi</dt><dd>{{ applyResult.durationMs === undefined ? 'Tidak dikirim API' : `${numberFormat(applyResult.durationMs)} ms` }}</dd></div>
           <div><dt>Verifikasi</dt><dd>{{ applyResult.verification ?? 'Hasil verifikasi tidak dikirim API.' }}</dd></div>
         </dl>
-        <button class="wb-button wb-primary" type="button" @click="viewResultTable">Lihat isi tabel hasil</button>
+        <div class="wb-dialog-actions">
+          <button class="wb-button wb-primary" type="button" @click="viewResultTable">Lihat isi tabel hasil</button>
+          <button class="wb-button" type="button" @click="openResultExportDialog">Ekspor tabel hasil</button>
+        </div>
       </template>
       <template v-else>
         <form class="wb-save-form" @submit.prevent="applyPipeline">
@@ -774,6 +777,13 @@
         </div>
       </form>
     </section>
+
+    <ExportDialog
+      :open="showResultExportDialog"
+      :database="applyResult?.database ?? ''"
+      :table="applyResult?.table ?? ''"
+      @close="showResultExportDialog = false"
+    />
   </div>
 </template>
 
@@ -923,6 +933,7 @@ const saveOriginal = ref(false)
 const applying = ref(false)
 const applyError = ref('')
 const applyResult = ref<ApplyResponse | null>(null)
+const showResultExportDialog = ref(false)
 const masterColumns = ref<Column[]>([])
 
 const rareColumn = ref('')
@@ -1663,18 +1674,25 @@ async function viewResultTable(): Promise<void> {
   await navigateTo('/sumber-data')
 }
 
+function openResultExportDialog(): void {
+  if (!applyResult.value) return
+  showResultExportDialog.value = true
+}
+
 function closePanels(): void {
   if (!applying.value && !importingRecipe.value) {
     showSqlPanel.value = false
     showExportDialog.value = false
     showImportDialog.value = false
     showMappingDialog.value = false
+    showResultExportDialog.value = false
     closeSaveDialog()
   }
 }
 
 function closeSaveDialog(): void {
   if (applying.value) return
+  showResultExportDialog.value = false
   showSaveDialog.value = false
 }
 
