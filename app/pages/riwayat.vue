@@ -104,6 +104,9 @@
                       <template v-if="entry.fitur_id === 'workbench'">
                         {{ formatNumber(entry.baris_terisi) }} baris hasil ·
                       </template>
+                      <template v-else-if="entry.fitur_id === 'ingest'">
+                        {{ formatNumber(entry.baris_terisi) }} baris dimuat ·
+                      </template>
                       <template v-else>
                         {{ formatNumber(entry.baris_ambigu) }} baris ambigu dibiarkan kosong ·
                       </template>
@@ -225,6 +228,7 @@ async function loadFeatureNames() {
 
 function featureName(id: string): string {
   if (id === 'workbench') return 'Ruang kerja cleansing'
+  if (id === 'ingest') return 'Muat data baru'
   return featureNames.value[id] ?? id
 }
 

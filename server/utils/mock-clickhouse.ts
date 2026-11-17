@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import type { Readable } from 'node:stream'
+import Papa from 'papaparse'
 
 export type MockColumn = {
   name: string
@@ -24,6 +26,14 @@ type QueryInput = {
 type CommandInput = {
   query: string
   query_params?: Record<string, unknown>
+  clickhouse_settings?: Record<string, unknown>
+}
+
+type InsertInput = {
+  table: string
+  values: Readable | Buffer | string
+  format?: string
+  columns?: string[]
   clickhouse_settings?: Record<string, unknown>
 }
 
@@ -1851,10 +1861,29 @@ export class MockClickHouseClient {
       return
     }
 
+    if (/^DROP\s+TABLE/i.test(trimmed)) {
+      const tokens = tokenize(trimmed)
+      let i = 2
+      const ifExists = tokens[i]?.type === 'ident' && tokens[i].value.toUpperCase() === 'IF'
+      if (ifExists) i += 2
+      const dbTok = tokens[i]
+      const tblTok = tokens[i + 2]
+      const database = dbTok?.type === 'ident' ? dbTok.value : 'default'
+      const table = tblTok?.type === 'ident' ? tblTok.value : ''
+      const db = this.databases.get(database)
+      if (!db?.has(table)) {
+        if (ifExists) return
+        throw new Error(`Table ${database}.${table} does not exist`)
+      }
+      db.delete(table)
+      return
+    }
+
     if (/^CREATE\s+TABLE/i.test(trimmed)) {
       const tokens = tokenize(trimmed)
       let i = 2
-      if (tokens[i]?.type === 'ident' && tokens[i].value.toUpperCase() === 'IF') i += 3
+      const ifNotExists = tokens[i]?.type === 'ident' && tokens[i].value.toUpperCase() === 'IF'
+      if (ifNotExists) i += 3
       const dbTok = tokens[i]
       const tblTok = tokens[i + 2]
       const database = dbTok?.type === 'ident' ? dbTok.value : 'default'
@@ -1878,9 +1907,11 @@ export class MockClickHouseClient {
 
       if (!this.databases.has(database)) this.databases.set(database, new Map())
       const db = this.databases.get(database)!
-      if (!db.has(table) || !/IF\s+NOT\s+EXISTS/i.test(trimmed)) {
-        db.set(table, { name: table, engine, sorting_key, columns, rows: [] })
+      if (db.has(table)) {
+        if (ifNotExists) return
+        throw new Error(`Table ${database}.${table} already exists`)
       }
+      db.set(table, { name: table, engine, sorting_key, columns, rows: [] })
       return
     }
 
@@ -1930,6 +1961,105 @@ export class MockClickHouseClient {
       for (const r of res.rows) {
         tbl.rows.push({ ...r })
       }
+    }
+  }
+
+  async insert({ table, values, format = 'CSVWithNames', columns, clickhouse_settings = {} }: InsertInput): Promise<void> {
+    const tblTokens = tokenize(table)
+    let database = 'default'
+    let tableName = ''
+    if (tblTokens.length >= 3 && tblTokens[1]?.type === 'punct' && tblTokens[1].value === '.') {
+      database = tblTokens[0]?.type === 'ident' ? tblTokens[0].value : 'default'
+      tableName = tblTokens[2]?.type === 'ident' ? tblTokens[2].value : ''
+    } else if (tblTokens[0]?.type === 'ident') {
+      tableName = tblTokens[0].value
+    }
+
+    const tbl = this.databases.get(database)?.get(tableName)
+    if (!tbl) {
+      throw new Error(`Target table ${database}.${tableName} not found`)
+    }
+
+    const targetColumns = columns?.length
+      ? columns.map((col) => {
+          const toks = tokenize(col)
+          return toks[0]?.type === 'ident' ? toks[0].value : col
+        })
+      : tbl.columns.map((c) => c.name)
+
+    const knownCols = new Set(tbl.columns.map((c) => c.name))
+    for (const col of targetColumns) {
+      if (!knownCols.has(col)) {
+        throw new Error(`Column ${col} does not exist in ${database}.${tableName}`)
+      }
+    }
+
+    let rawText = ''
+    if (typeof values === 'string') {
+      rawText = values
+    } else if (Buffer.isBuffer(values)) {
+      rawText = values.toString('utf8')
+    } else {
+      const chunks: Buffer[] = []
+      for await (const chunk of values) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      rawText = Buffer.concat(chunks).toString('utf8')
+    }
+
+    if (rawText.startsWith('\uFEFF')) {
+      rawText = rawText.slice(1)
+    }
+
+    if (format !== 'CSVWithNames' && format !== 'CSV') {
+      throw new Error(`Unsupported mock insert format: ${format}`)
+    }
+
+    const delimiterSetting = clickhouse_settings.format_csv_delimiter
+    const delimiter = typeof delimiterSetting === 'string' && delimiterSetting.length === 1
+      ? delimiterSetting
+      : ','
+
+    const parsed = Papa.parse<string[]>(rawText, {
+      delimiter,
+      header: false,
+      skipEmptyLines: true,
+    })
+
+    if (parsed.errors.length > 0) {
+      throw new Error(`Malformed CSV payload: ${parsed.errors[0]?.message ?? 'unknown error'}`)
+    }
+
+    const allRows = parsed.data
+    let dataRows = allRows
+    if (format === 'CSVWithNames') {
+      if (allRows.length === 0) {
+        throw new Error('CSVWithNames payload has no header row')
+      }
+      const header = allRows[0] ?? []
+      if (clickhouse_settings.input_format_csv_allow_variable_number_of_columns === 0 && header.length !== targetColumns.length) {
+        throw new Error('CSV header column count mismatch')
+      }
+      dataRows = allRows.slice(1)
+    }
+
+    const strictCols = clickhouse_settings.input_format_csv_allow_variable_number_of_columns === 0
+    for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx += 1) {
+      const row = dataRows[rowIdx] ?? []
+      if (strictCols && row.length !== targetColumns.length) {
+        throw new Error(`CSV row ${rowIdx + 1} has ${row.length} columns, expected ${targetColumns.length}`)
+      }
+    }
+
+    for (const row of dataRows) {
+      const record: Record<string, unknown> = {}
+      for (const col of tbl.columns) {
+        record[col.name] = col.type.startsWith('Nullable(') ? null : ''
+      }
+      targetColumns.forEach((colName, idx) => {
+        record[colName] = row[idx] ?? ''
+      })
+      tbl.rows.push(record)
     }
   }
 }

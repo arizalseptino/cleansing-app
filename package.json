@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@clickhouse/client": "^1.25.0",
+    "@types/papaparse": "^5.5.2",
     "nuxt": "^4.6.4",
+    "papaparse": "^5.7.1",
     "vue": "^3.5.45",
     "vue-router": "^5.4.0"
   }

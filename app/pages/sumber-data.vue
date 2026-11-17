@@ -1,5 +1,20 @@
 <template>
   <div class="bento">
+      <section class="kartu source-ingest-bar span-12" aria-label="Pemuat data baru">
+        <div class="source-ingest-copy">
+          <p class="page-kicker">Pemuat data staging</p>
+          <p class="source-ingest-desc">Buat tabel baru di ClickHouse dari file CSV/TSV/TXT atau teks yang ditempel untuk langsung dibersihkan.</p>
+        </div>
+        <button
+          type="button"
+          class="source-primary-btn"
+          :disabled="databasesPending || databases.length === 0"
+          @click="openIngestModal"
+        >
+          Muat data baru
+        </button>
+      </section>
+
       <article class="kartu source-card span-4" aria-label="Pilih sumber">
         <h2 class="card-title">Pilih sumber</h2>
 
@@ -191,6 +206,324 @@
             Berikutnya
           </button>
         </nav>
+      </template>
+    </section>
+
+    <div
+      v-if="showIngestModal"
+      class="ingest-backdrop"
+      @click.self="closeIngestModal"
+    />
+    <section
+      v-if="showIngestModal"
+      class="kartu ingest-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ingest-dialog-title"
+      tabindex="-1"
+      @keydown="handleIngestKeydown"
+    >
+      <div class="ingest-dialog-heading">
+        <div>
+          <p class="page-kicker">Tabel staging baru</p>
+          <h2 id="ingest-dialog-title" class="card-title">
+            {{ ingestCommitResult ? 'Tabel baru berhasil dibuat' : 'Muat data baru' }}
+          </h2>
+        </div>
+        <button
+          v-if="!ingestCommitPending"
+          type="button"
+          class="ingest-close-btn"
+          @click="closeIngestModal"
+        >
+          Tutup
+        </button>
+      </div>
+
+      <template v-if="ingestCommitResult">
+        <p class="ingest-safety-note" role="status">
+          {{ ingestCommitResult.verification }}
+        </p>
+        <dl class="ingest-summary-list">
+          <div>
+            <dt>Tabel baru</dt>
+            <dd><code>{{ ingestCommitResult.database }}.{{ ingestCommitResult.table }}</code></dd>
+          </div>
+          <div>
+            <dt>Sumber</dt>
+            <dd>{{ ingestCommitResult.sourceLabel }}</dd>
+          </div>
+          <div>
+            <dt>Baris dimuat</dt>
+            <dd>{{ formatIdNumber(ingestCommitResult.rows) }}</dd>
+          </div>
+          <div>
+            <dt>Jumlah kolom</dt>
+            <dd>{{ formatIdNumber(ingestCommitResult.columns.length) }} (semua bertipe <code>Nullable(String)</code>)</dd>
+          </div>
+          <div>
+            <dt>Durasi</dt>
+            <dd>{{ formatIdNumber(ingestCommitResult.durationMs) }} ms</dd>
+          </div>
+        </dl>
+        <p v-if="ingestCommitResult.historyWarning" class="source-message source-error" role="status">
+          {{ ingestCommitResult.historyWarning }}
+        </p>
+        <div class="ingest-actions">
+          <button type="button" class="source-primary-btn" @click="viewIngestedTable">
+            Lihat isi tabel
+          </button>
+          <button type="button" class="ingest-secondary-btn" @click="openIngestedInWorkbench">
+            Buka di ruang kerja
+          </button>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="ingest-tabs" role="tablist" aria-label="Cara memasukkan data">
+          <button
+            type="button"
+            role="tab"
+            class="ingest-tab"
+            :class="{ 'ingest-tab--active': ingestMode === 'file' }"
+            :aria-selected="ingestMode === 'file'"
+            :disabled="ingestCommitPending"
+            @click="switchIngestMode('file')"
+          >
+            Unggah file
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="ingest-tab"
+            :class="{ 'ingest-tab--active': ingestMode === 'text' }"
+            :aria-selected="ingestMode === 'text'"
+            :disabled="ingestCommitPending"
+            @click="switchIngestMode('text')"
+          >
+            Tempel teks
+          </button>
+          <button
+            type="button"
+            class="ingest-tab ingest-tab--disabled"
+            disabled
+            title="gunakan ekspor CSV UTF-8 dari Excel"
+          >
+            Excel (.xlsx) — gunakan ekspor CSV UTF-8 dari Excel
+          </button>
+        </div>
+
+        <div v-if="ingestMode === 'file'" class="ingest-input-panel">
+          <label class="ingest-label" for="ingest-file-input">
+            Pilih file CSV, TSV, atau TXT (UTF-8, maks. 50 MB)
+          </label>
+          <input
+            id="ingest-file-input"
+            ref="fileInputRef"
+            type="file"
+            accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+            :disabled="ingestInspectPending || ingestCommitPending"
+            @change="handleIngestFileChange"
+          />
+          <p v-if="ingestFile" class="ingest-meta-hint">
+            File dipilih: <strong>{{ ingestFile.name }}</strong> ({{ formatFileSize(ingestFile.size) }})
+          </p>
+        </div>
+
+        <div v-else class="ingest-input-panel">
+          <label class="ingest-label" for="ingest-pasted-text">
+            Tempel isi CSV atau TSV lengkap dengan baris judul (maks. 2 MB)
+          </label>
+          <textarea
+            id="ingest-pasted-text"
+            v-model="ingestPastedText"
+            rows="6"
+            placeholder="nama,kota,catatan&#10;Budi Santoso,Bandung,Pelanggan aktif"
+            :disabled="ingestInspectPending || ingestCommitPending"
+            @input="resetInspectionOnEdit"
+          />
+          <div class="ingest-text-toolbar">
+            <span class="ingest-meta-hint">
+              Ukuran teks: {{ formatFileSize(pastedTextBytes) }} / 2 MB
+            </span>
+            <button
+              type="button"
+              class="ingest-secondary-btn"
+              :disabled="!ingestPastedText.trim() || pastedTextBytes > maxTextBytes || ingestInspectPending || ingestCommitPending"
+              @click="runIngestInspect(true)"
+            >
+              {{ ingestInspectPending ? 'Memeriksa...' : 'Periksa teks' }}
+            </button>
+          </div>
+          <p v-if="pastedTextBytes > maxTextBytes" class="source-message source-error" role="alert">
+            Teks yang ditempel melebihi batas maksimal 2 MB.
+          </p>
+        </div>
+
+        <p v-if="ingestInspectPending" class="source-message" role="status">
+          Memeriksa baris judul, pemisah kolom, dan 20 baris contoh...
+        </p>
+        <p v-if="ingestInspectError" class="source-message source-error" role="alert">
+          {{ ingestInspectError }}
+        </p>
+
+        <template v-if="ingestInspection">
+          <section class="ingest-section" aria-label="Hasil pemeriksaan data">
+            <div class="ingest-section-head">
+              <div>
+                <h3>Pratinjau &amp; pemisah kolom</h3>
+                <p class="ingest-meta-hint">
+                  <strong>{{ formatIdNumber(ingestInspection.rowCount) }}</strong> baris data ·
+                  <strong>{{ formatIdNumber(ingestInspection.columnCount) }}</strong> kolom ·
+                  Terdeteksi: <strong>{{ delimiterLabel(ingestInspection.detectedDelimiter) }}</strong>
+                </p>
+              </div>
+              <label class="ingest-inline-field" for="ingest-delimiter-select">
+                <span>Pemisah kolom</span>
+                <select
+                  id="ingest-delimiter-select"
+                  v-model="ingestDelimiter"
+                  :disabled="ingestInspectPending || ingestCommitPending"
+                  @change="runIngestInspect(false)"
+                >
+                  <option value=",">Koma (,)</option>
+                  <option value=";">Titik koma (;)</option>
+                  <option value="	">Tab (\t)</option>
+                  <option value="|">Pipa (|)</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="ingest-columns-editor">
+              <h4>Nama kolom hasil (dapat diubah)</h4>
+              <div class="ingest-columns-grid">
+                <label
+                  v-for="(rawHeader, colIdx) in ingestInspection.rawHeaders"
+                  :key="colIdx"
+                  class="ingest-col-field"
+                >
+                  <span :title="rawHeader || `Kolom ${colIdx + 1}`">
+                    Asli: {{ rawHeader || `(kosong #${colIdx + 1})` }}
+                  </span>
+                  <input
+                    v-model="ingestEditedColumns[colIdx]"
+                    type="text"
+                    maxlength="64"
+                    :disabled="ingestCommitPending"
+                    :aria-label="`Nama kolom untuk ${rawHeader || `kolom ${colIdx + 1}`}`"
+                  />
+                </label>
+              </div>
+              <p v-if="ingestColumnValidationError" class="source-message source-error" role="alert">
+                {{ ingestColumnValidationError }}
+              </p>
+            </div>
+
+            <div v-if="ingestInspection.previewRows.length === 0" class="source-message" role="status">
+              File hanya berisi baris judul (0 baris data).
+            </div>
+            <div v-else class="rows-table-viewport ingest-preview-viewport">
+              <table class="rows-table">
+                <thead>
+                  <tr>
+                    <th v-for="(colName, colIdx) in ingestEditedColumns" :key="colIdx" scope="col">
+                      <span :title="colName">{{ colName || `kolom_${colIdx + 1}` }}</span>
+                      <small>Nullable(String)</small>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rowIdx) in ingestInspection.previewRows" :key="rowIdx">
+                    <td v-for="(colName, colIdx) in ingestEditedColumns" :key="colIdx">
+                      <span
+                        class="rows-cell-value"
+                        :class="{ 'rows-cell-value--empty': (row[colIdx] ?? '') === '' }"
+                        :title="displayCellValue(row[colIdx] ?? '')"
+                      >
+                        {{ displayCellValue(row[colIdx] ?? '') }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <form class="ingest-commit-form" @submit.prevent="submitIngestCommit">
+            <div class="ingest-target-grid">
+              <label class="ingest-target-field" for="ingest-target-db">
+                <span>Database tujuan</span>
+                <select
+                  id="ingest-target-db"
+                  v-model="ingestTargetDatabase"
+                  :disabled="ingestCommitPending || databases.length === 0"
+                  required
+                >
+                  <option value="" disabled>Pilih database</option>
+                  <option v-for="database in databases" :key="database.name" :value="database.name">
+                    {{ database.name }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="ingest-target-field" for="ingest-table-name">
+                <span>Nama tabel baru</span>
+                <input
+                  id="ingest-table-name"
+                  v-model="ingestTargetTable"
+                  type="text"
+                  maxlength="64"
+                  placeholder="contoh: data_staging_baru"
+                  :disabled="ingestCommitPending"
+                  required
+                />
+              </label>
+            </div>
+
+            <p v-if="ingestTargetTable && !isValidTargetTableName" class="source-message source-error" role="alert">
+              Nama tabel harus diawali huruf, hanya berisi huruf, angka, dan garis bawah, maksimal 64 karakter.
+            </p>
+
+            <div class="ingest-summary-box">
+              <p>
+                Ringkasan: membuat tabel baru
+                <code>{{ ingestTargetDatabase || '...' }}.{{ ingestTargetTable.trim() || '...' }}</code>
+                dengan <strong>{{ formatIdNumber(ingestInspection.columnCount) }}</strong> kolom bertipe
+                <code>Nullable(String)</code> dan memuat
+                <strong>{{ formatIdNumber(ingestInspection.rowCount) }}</strong> baris data dari
+                <strong>{{ ingestInspection.sourceLabel }}</strong>.
+              </p>
+              <p class="ingest-empty-note">
+                Catatan: nilai kosong dimuat apa adanya sebagai string kosong; gunakan operasi &ldquo;Rapikan teks&rdquo; (ubah string kosong menjadi NULL) di ruang kerja bila perlu.
+              </p>
+            </div>
+
+            <p v-if="ingestCommitError" class="source-message source-error" role="alert">
+              {{ ingestCommitError }}
+            </p>
+            <p v-if="ingestCommitPending" class="source-message" role="status">
+              Sedang membuat tabel baru dan mengalirkan data ke ClickHouse... Mohon tunggu.
+            </p>
+
+            <div class="ingest-actions">
+              <button
+                type="submit"
+                class="source-primary-btn"
+                :disabled="!canSubmitIngestCommit"
+              >
+                {{ ingestCommitPending ? 'Membuat tabel...' : 'Buat tabel' }}
+              </button>
+              <button
+                type="button"
+                class="ingest-secondary-btn"
+                :disabled="ingestCommitPending"
+                @click="closeIngestModal"
+              >
+                Batal
+              </button>
+            </div>
+          </form>
+        </template>
       </template>
     </section>
   </div>
@@ -458,6 +791,319 @@ async function handleTableChange(event: Event) {
   if (selectedDatabase.value && table) {
     await loadColumns(selectedDatabase.value, table)
   }
+}
+
+function formatIdNumber(value: number): string {
+  return new Intl.NumberFormat('id-ID').format(value)
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${formatIdNumber(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+type IngestInspectResponse = {
+  mode: 'file' | 'text'
+  sourceLabel: string
+  delimiter: ',' | ';' | '\t' | '|'
+  detectedDelimiter: ',' | ';' | '\t' | '|'
+  rawHeaders: string[]
+  suggestedColumns: string[]
+  previewRows: string[][]
+  rowCount: number
+  columnCount: number
+}
+
+type IngestCommitResponse = {
+  database: string
+  table: string
+  sourceLabel: string
+  delimiter: string
+  columns: string[]
+  rows: number
+  durationMs: number
+  verification: string
+  historyWarning: string | null
+}
+
+const maxFileBytes = 50 * 1024 * 1024
+const maxTextBytes = 2 * 1024 * 1024
+const newTableNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
+const columnNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+
+const showIngestModal = ref(false)
+const ingestMode = ref<'file' | 'text'>('file')
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const ingestFile = ref<File | null>(null)
+const ingestPastedText = ref('')
+const ingestDelimiter = ref<string>('auto')
+const ingestInspection = ref<IngestInspectResponse | null>(null)
+const ingestEditedColumns = ref<string[]>([])
+const ingestTargetDatabase = ref('')
+const ingestTargetTable = ref('')
+const ingestInspectPending = ref(false)
+const ingestInspectError = ref('')
+const ingestCommitPending = ref(false)
+const ingestCommitError = ref('')
+const ingestCommitResult = ref<IngestCommitResponse | null>(null)
+
+const pastedTextBytes = computed(() => new TextEncoder().encode(ingestPastedText.value).length)
+const isValidTargetTableName = computed(() => newTableNamePattern.test(ingestTargetTable.value.trim()))
+
+const ingestColumnValidationError = computed(() => {
+  if (!ingestInspection.value) return ''
+  if (ingestEditedColumns.value.length !== ingestInspection.value.columnCount) {
+    return 'Jumlah nama kolom tidak sesuai dengan data.'
+  }
+  const seen = new Set<string>()
+  for (let i = 0; i < ingestEditedColumns.value.length; i += 1) {
+    const col = (ingestEditedColumns.value[i] ?? '').trim()
+    if (!columnNamePattern.test(col)) {
+      return `Kolom ke-${i + 1} ("${col || 'kosong'}") harus diawali huruf atau garis bawah, hanya huruf/angka/garis bawah, maks. 64 karakter.`
+    }
+    if (seen.has(col)) {
+      return `Nama kolom "${col}" duplikat. Setiap kolom harus unik.`
+    }
+    seen.add(col)
+  }
+  return ''
+})
+
+const canSubmitIngestCommit = computed(() => (
+  Boolean(ingestInspection.value)
+  && !ingestInspectPending.value
+  && !ingestCommitPending.value
+  && Boolean(ingestTargetDatabase.value)
+  && isValidTargetTableName.value
+  && !ingestColumnValidationError.value
+))
+
+function delimiterLabel(delimiter: string): string {
+  if (delimiter === ',') return 'Koma (,)'
+  if (delimiter === ';') return 'Titik koma (;)'
+  if (delimiter === '\t') return 'Tab (\\t)'
+  if (delimiter === '|') return 'Pipa (|)'
+  return delimiter
+}
+
+function suggestTableNameFromFilename(filename: string): string {
+  const withoutExt = filename.replace(/\.[^.]+$/, '')
+  let clean = withoutExt
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  if (!clean) clean = 'tabel_baru'
+  if (!/^[A-Za-z]/.test(clean)) clean = `tbl_${clean}`
+  return clean.slice(0, 64).replace(/_+$/g, '') || 'tabel_baru'
+}
+
+function openIngestModal() {
+  showIngestModal.value = true
+  ingestMode.value = 'file'
+  ingestFile.value = null
+  ingestPastedText.value = ''
+  ingestDelimiter.value = 'auto'
+  ingestInspection.value = null
+  ingestEditedColumns.value = []
+  ingestTargetDatabase.value = selectedDatabase.value ?? databases.value[0]?.name ?? ''
+  ingestTargetTable.value = ''
+  ingestInspectPending.value = false
+  ingestInspectError.value = ''
+  ingestCommitPending.value = false
+  ingestCommitError.value = ''
+  ingestCommitResult.value = null
+}
+
+function closeIngestModal() {
+  if (ingestCommitPending.value) return
+  showIngestModal.value = false
+}
+
+function handleIngestKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && !ingestCommitPending.value) {
+    closeIngestModal()
+  }
+}
+
+function switchIngestMode(nextMode: 'file' | 'text') {
+  if (ingestCommitPending.value || ingestMode.value === nextMode) return
+  ingestMode.value = nextMode
+  ingestInspection.value = null
+  ingestEditedColumns.value = []
+  ingestInspectError.value = ''
+  ingestCommitError.value = ''
+  ingestDelimiter.value = 'auto'
+}
+
+function resetInspectionOnEdit() {
+  ingestInspection.value = null
+  ingestEditedColumns.value = []
+  ingestInspectError.value = ''
+  ingestCommitError.value = ''
+  ingestDelimiter.value = 'auto'
+}
+
+function handleIngestFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  ingestInspection.value = null
+  ingestEditedColumns.value = []
+  ingestInspectError.value = ''
+  ingestCommitError.value = ''
+  ingestDelimiter.value = 'auto'
+
+  if (!file) {
+    ingestFile.value = null
+    return
+  }
+
+  const lower = file.name.toLowerCase()
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+    ingestFile.value = null
+    ingestInspectError.value = 'Format Excel (.xlsx/.xls) belum didukung; gunakan ekspor CSV UTF-8 dari Excel.'
+    return
+  }
+  if (!lower.endsWith('.csv') && !lower.endsWith('.tsv') && !lower.endsWith('.txt')) {
+    ingestFile.value = null
+    ingestInspectError.value = 'Ekstensi file tidak didukung. Gunakan file .csv, .tsv, atau .txt.'
+    return
+  }
+  if (file.size === 0) {
+    ingestFile.value = null
+    ingestInspectError.value = 'File yang dipilih kosong.'
+    return
+  }
+  if (file.size > maxFileBytes) {
+    ingestFile.value = null
+    ingestInspectError.value = 'Ukuran file melebihi batas maksimal 50 MB.'
+    return
+  }
+
+  ingestFile.value = file
+  if (!ingestTargetTable.value.trim()) {
+    ingestTargetTable.value = suggestTableNameFromFilename(file.name)
+  }
+  void runIngestInspect(true)
+}
+
+async function runIngestInspect(autoDelimiter = false) {
+  ingestInspectError.value = ''
+  ingestCommitError.value = ''
+
+  if (ingestMode.value === 'file' && !ingestFile.value) {
+    ingestInspectError.value = 'Pilih file terlebih dahulu.'
+    return
+  }
+  if (ingestMode.value === 'text') {
+    if (!ingestPastedText.value.trim()) {
+      ingestInspectError.value = 'Tempel teks CSV atau TSV terlebih dahulu.'
+      return
+    }
+    if (pastedTextBytes.value > maxTextBytes) {
+      ingestInspectError.value = 'Teks yang ditempel melebihi batas maksimal 2 MB.'
+      return
+    }
+  }
+
+  ingestInspectPending.value = true
+  try {
+    const delimiterToSend = autoDelimiter ? 'auto' : ingestDelimiter.value
+    let response: IngestInspectResponse
+
+    if (ingestMode.value === 'file' && ingestFile.value) {
+      const formData = new FormData()
+      formData.append('file', ingestFile.value)
+      formData.append('delimiter', delimiterToSend)
+      response = await $fetch<IngestInspectResponse>('/api/ingest/inspect', {
+        method: 'POST',
+        body: formData,
+      })
+    } else {
+      response = await $fetch<IngestInspectResponse>('/api/ingest/inspect', {
+        method: 'POST',
+        body: {
+          pastedText: ingestPastedText.value,
+          delimiter: delimiterToSend,
+        },
+      })
+    }
+
+    ingestInspection.value = response
+    ingestDelimiter.value = response.delimiter
+    ingestEditedColumns.value = [...response.suggestedColumns]
+    if (!ingestTargetDatabase.value) {
+      ingestTargetDatabase.value = selectedDatabase.value ?? databases.value[0]?.name ?? ''
+    }
+  } catch (error) {
+    ingestInspection.value = null
+    ingestEditedColumns.value = []
+    ingestInspectError.value = getErrorMessage(error, 'Data tidak dapat diperiksa sebagai CSV/TSV yang valid.')
+  } finally {
+    ingestInspectPending.value = false
+  }
+}
+
+async function submitIngestCommit() {
+  if (!canSubmitIngestCommit.value || !ingestInspection.value) return
+
+  ingestCommitPending.value = true
+  ingestCommitError.value = ''
+  const trimmedColumns = ingestEditedColumns.value.map((col) => col.trim())
+  const trimmedTable = ingestTargetTable.value.trim()
+
+  try {
+    let response: IngestCommitResponse
+
+    if (ingestMode.value === 'file' && ingestFile.value) {
+      const formData = new FormData()
+      formData.append('file', ingestFile.value)
+      formData.append('delimiter', ingestDelimiter.value)
+      formData.append('targetDatabase', ingestTargetDatabase.value)
+      formData.append('tableName', trimmedTable)
+      formData.append('columns', JSON.stringify(trimmedColumns))
+      response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
+        method: 'POST',
+        body: formData,
+      })
+    } else {
+      response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
+        method: 'POST',
+        body: {
+          pastedText: ingestPastedText.value,
+          delimiter: ingestDelimiter.value,
+          targetDatabase: ingestTargetDatabase.value,
+          tableName: trimmedTable,
+          columns: trimmedColumns,
+        },
+      })
+    }
+
+    ingestCommitResult.value = response
+  } catch (error) {
+    ingestCommitError.value = getErrorMessage(error, 'Gagal memuat data ke tabel baru ClickHouse.')
+  } finally {
+    ingestCommitPending.value = false
+  }
+}
+
+async function viewIngestedTable() {
+  if (!ingestCommitResult.value) return
+  const { database, table } = ingestCommitResult.value
+  source.setDatabase(database)
+  source.setTable(table)
+  showIngestModal.value = false
+  await loadDatabases()
+}
+
+async function openIngestedInWorkbench() {
+  if (!ingestCommitResult.value) return
+  const { database, table } = ingestCommitResult.value
+  source.setDatabase(database)
+  source.setTable(table)
+  showIngestModal.value = false
+  await navigateTo('/cleansing')
 }
 
 onMounted(loadDatabases)
@@ -795,6 +1441,313 @@ onMounted(loadDatabases)
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+.source-ingest-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.source-ingest-copy .page-kicker {
+  margin-bottom: 4px;
+}
+
+.source-ingest-desc {
+  margin: 0;
+  color: var(--warna-redup);
+  font-size: 14px;
+}
+
+.source-primary-btn,
+.ingest-secondary-btn,
+.ingest-close-btn {
+  min-height: 42px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.source-primary-btn {
+  border: 1px solid var(--warna-utama);
+  color: #fff;
+  background: var(--warna-utama);
+  font-weight: 700;
+}
+
+.source-primary-btn:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.ingest-secondary-btn,
+.ingest-close-btn {
+  border: 1px solid var(--warna-garis);
+  color: #375875;
+  background: #fff;
+  font-weight: 600;
+}
+
+.ingest-close-btn {
+  min-height: 36px;
+  padding: 6px 11px;
+  font-size: 13px;
+}
+
+.source-primary-btn:disabled,
+.ingest-secondary-btn:disabled,
+.ingest-close-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.ingest-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgb(21 38 55 / 42%);
+}
+
+.ingest-dialog {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  z-index: 21;
+  display: grid;
+  gap: 14px;
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(90vh, 920px);
+  overflow: auto;
+  transform: translate(-50%, -50%);
+}
+
+.ingest-dialog-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ingest-dialog-heading .page-kicker {
+  margin-bottom: 3px;
+}
+
+.ingest-dialog-heading .card-title {
+  margin: 0;
+}
+
+.ingest-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ingest-tab {
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: #375875;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ingest-tab--active {
+  border-color: var(--warna-utama);
+  color: #fff;
+  background: var(--warna-utama);
+}
+
+.ingest-tab--disabled {
+  color: #7c8b99;
+  background: #f4f7fa;
+  cursor: not-allowed;
+}
+
+.ingest-input-panel,
+.ingest-section,
+.ingest-commit-form,
+.ingest-columns-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.ingest-input-panel {
+  padding: 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  background: #f8fbfe;
+}
+
+.ingest-label {
+  color: #263a4e;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ingest-input-panel input[type='file'] {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ingest-input-panel textarea,
+.ingest-inline-field select,
+.ingest-col-field input,
+.ingest-target-field select,
+.ingest-target-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.ingest-input-panel textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.ingest-text-toolbar,
+.ingest-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ingest-section-head h3,
+.ingest-columns-editor h4 {
+  margin: 0;
+  color: #263a4e;
+  font-size: 14px;
+}
+
+.ingest-meta-hint {
+  margin: 0;
+  color: var(--warna-redup);
+  font-size: 13px;
+}
+
+.ingest-inline-field,
+.ingest-target-field,
+.ingest-col-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ingest-inline-field {
+  min-width: 180px;
+}
+
+.ingest-inline-field span,
+.ingest-target-field span {
+  color: #40566d;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ingest-columns-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 10px;
+  background: #f8fbfe;
+}
+
+.ingest-col-field span {
+  overflow: hidden;
+  color: var(--warna-redup);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-preview-viewport {
+  max-height: 280px;
+}
+
+.ingest-target-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ingest-summary-box,
+.ingest-safety-note {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #d5e5c4;
+  border-radius: 9px;
+  color: #365228;
+  background: #f1f7e9;
+  font-size: 13px;
+}
+
+.ingest-summary-box p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ingest-empty-note {
+  color: #5b4d1d;
+}
+
+.ingest-summary-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.ingest-summary-list > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ingest-summary-list dt {
+  color: var(--warna-redup);
+  font-size: 13px;
+}
+
+.ingest-summary-list dd {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ingest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .ingest-dialog {
+    width: calc(100vw - 24px);
+    padding: 16px;
+  }
+
+  .ingest-target-grid,
+  .ingest-summary-list > div {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

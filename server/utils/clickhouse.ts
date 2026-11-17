@@ -1,4 +1,5 @@
 import { createClient } from '@clickhouse/client'
+import type { Readable } from 'node:stream'
 import { useMockClickHouse } from './mock-clickhouse'
 
 export type ClickHouseLikeClient = {
@@ -11,6 +12,13 @@ export type ClickHouseLikeClient = {
   command: (params: {
     query: string
     query_params?: Record<string, unknown>
+    clickhouse_settings?: Record<string, unknown>
+  }) => Promise<unknown>
+  insert: (params: {
+    table: string
+    values: Readable | Buffer | string
+    format?: string
+    columns?: string[]
     clickhouse_settings?: Record<string, unknown>
   }) => Promise<unknown>
 }
