@@ -1,45 +1,45 @@
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <NuxtLink class="brand" to="/" aria-label="BersihData, ke ringkasan">
+      <NuxtLink class="brand" to="/" aria-label="BersihData, ke ringkasan" title="BersihData">
         <img class="brand-mark" src="~/assets/logo-cleaningdata.png" alt="" width="38" height="38" />
         <span class="brand-name">Bersih<span>Data</span></span>
       </NuxtLink>
 
       <p class="sidebar-label">Ruang kerja</p>
       <nav class="side-nav" aria-label="Navigasi utama">
-        <NuxtLink to="/">
+        <NuxtLink to="/" title="Ringkasan">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
             <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
             <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
             <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.7" />
           </svg>
-          Ringkasan
+          <span class="nav-label">Ringkasan</span>
         </NuxtLink>
-        <NuxtLink to="/sumber-data">
+        <NuxtLink to="/sumber-data" title="Sumber data">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <rect x="3.5" y="4.5" width="17" height="15" stroke="currentColor" stroke-width="1.7" />
             <path d="M3.5 9.5h17M9 9.5v10M15 9.5v10M3.5 14.5h17" stroke="currentColor" stroke-width="1.7" />
           </svg>
-          Sumber data
+          <span class="nav-label">Sumber data</span>
         </NuxtLink>
-        <NuxtLink to="/cleansing">
+        <NuxtLink to="/cleansing" title="Cleansing">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 5h16M7 5v5l4 4v5l2 1v-6l4-4V5M9 9h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          Cleansing
+          <span class="nav-label">Cleansing</span>
         </NuxtLink>
-        <NuxtLink to="/riwayat">
+        <NuxtLink to="/riwayat" title="Riwayat">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5M4 4.5v4h4M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          Riwayat
+          <span class="nav-label">Riwayat</span>
         </NuxtLink>
       </nav>
 
       <div class="sidebar-spacer" />
-      <div class="profile">
+      <div class="profile" title="User">
         <div class="profile-avatar" aria-hidden="true">U</div>
         <p class="profile-name">User</p>
       </div>

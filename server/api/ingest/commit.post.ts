@@ -69,7 +69,7 @@ export default defineEventHandler(async (event) => {
 
     await client.command({
       query: `CREATE TABLE ${quotedDb}.${quotedTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
-      clickhouse_settings: { max_execution_time: 30 },
+      clickhouse_settings: { max_execution_time: 60 },
     })
     createdNewTable = true
 
@@ -78,10 +78,11 @@ export default defineEventHandler(async (event) => {
       table: `${quotedDb}.${quotedTable}`,
       columns: quotedColumns,
       values: rawStream,
-      format: 'CSVWithNames',
+      format: 'CSV',
       clickhouse_settings: {
         format_csv_delimiter: delimiter,
-        input_format_with_names_use_header: 0,
+        input_format_csv_skip_first_lines: 1,
+        input_format_csv_detect_header: 0,
         format_csv_allow_double_quotes: 1,
         format_csv_allow_single_quotes: 0,
         input_format_allow_errors_num: 0,
@@ -91,14 +92,14 @@ export default defineEventHandler(async (event) => {
         input_format_csv_empty_as_default: 0,
         format_csv_null_representation: '\\N',
         input_format_csv_skip_trailing_empty_lines: 1,
-        max_execution_time: 120,
+        max_execution_time: 600,
       },
     })
 
     const countResult = await client.query({
       query: `SELECT count() AS total FROM ${quotedDb}.${quotedTable}`,
       format: 'JSONEachRow',
-      clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+      clickhouse_settings: { readonly: 1, max_execution_time: 60 },
     })
     const countRows = await countResult.json<{ total: number | string }[]>()
     const actualCount = Number(countRows[0]?.total)
@@ -107,7 +108,7 @@ export default defineEventHandler(async (event) => {
       throw createError({
         statusCode: 500,
         statusMessage: 'Verifikasi jumlah baris gagal.',
-        message: 'Jumlah baris pada tabel baru tidak sama dengan jumlah baris data sumber.',
+        message: `Jumlah baris pada tabel baru (${actualCount.toLocaleString('id-ID')}) tidak sama dengan data sumber (${expectedRowCount.toLocaleString('id-ID')}).`,
       })
     }
 

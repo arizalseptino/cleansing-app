@@ -479,5 +479,13 @@ export function sanitizeIngestErrorMessage(error: unknown, fallback: string): st
   if (isHttpError(error)) {
     return error.message
   }
+  if (error instanceof Error && error.message) {
+    const raw = error.message
+    if (raw.toLowerCase().includes('timeout') || raw.toLowerCase().includes('timed out')) {
+      return `${fallback} Penyebab: Waktu eksekusi habis (timeout) saat memproses data.`
+    }
+    const cleanMsg = raw.replace(/^DB::Exception:\s*/i, '').split('\n')[0]?.trim() || raw
+    return `${fallback} Detail: ${cleanMsg}`
+  }
   return fallback
 }

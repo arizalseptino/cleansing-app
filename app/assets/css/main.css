@@ -52,28 +52,38 @@ a {
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  z-index: 2;
+  z-index: 20;
   display: flex;
-  width: 220px;
+  width: 68px;
   flex-direction: column;
-  padding: 24px 16px 18px;
+  padding: 22px 13px 18px;
   background: #fff;
   border-right: 1px solid var(--warna-garis);
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar:hover,
+.sidebar:focus-within {
+  width: 220px;
+  box-shadow: 6px 0 28px rgba(26, 43, 60, 0.08);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 8px;
+  gap: 11px;
+  padding: 0 2px;
   color: var(--warna-teks);
   text-decoration: none;
+  min-height: 38px;
 }
 
 .brand-mark {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
   object-fit: contain;
 }
 
@@ -81,6 +91,12 @@ a {
   font-size: 14px;
   font-weight: 750;
   letter-spacing: -0.035em;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
 }
 
 .brand-name span {
@@ -88,31 +104,39 @@ a {
 }
 
 .sidebar-label {
-  margin: 30px 8px 10px;
+  margin: 24px 8px 10px;
   color: #99a7b7;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.13em;
   text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
 }
 
 .side-nav {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .side-nav a {
   display: flex;
   min-height: 44px;
   align-items: center;
-  gap: 10px;
-  padding: 0 10px;
-  border-radius: 11px;
+  gap: 12px;
+  padding: 0 12px;
+  border-radius: 12px;
   color: #637287;
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
   transition: background-color 160ms ease, color 160ms ease;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .side-nav a:hover,
@@ -122,9 +146,18 @@ a {
 }
 
 .side-nav svg {
-  width: 17px;
-  height: 17px;
-  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
+.nav-label {
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
 }
 
 .sidebar-spacer {
@@ -134,16 +167,17 @@ a {
 .profile {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   margin-top: 20px;
   padding: 0 5px;
+  min-height: 36px;
 }
 
 .profile-avatar {
   display: grid;
   width: 32px;
   height: 32px;
-  flex: 0 0 auto;
+  flex: 0 0 32px;
   place-items: center;
   border-radius: 50%;
   color: #48501c;
@@ -156,6 +190,26 @@ a {
   margin: 0;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+}
+
+.sidebar:hover .brand-name,
+.sidebar:focus-within .brand-name,
+.sidebar:hover .sidebar-label,
+.sidebar:focus-within .sidebar-label,
+.sidebar:hover .nav-label,
+.sidebar:focus-within .nav-label,
+.sidebar:hover .profile-name,
+.sidebar:focus-within .profile-name {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .profile-role {
@@ -166,7 +220,8 @@ a {
 
 .app-main {
   min-height: 100vh;
-  margin-left: 220px;
+  margin-left: 68px;
+  transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .topbar {
@@ -437,11 +492,16 @@ a {
 
 @media (max-width: 960px) {
   .sidebar {
+    width: 68px;
+  }
+
+  .sidebar:hover,
+  .sidebar:focus-within {
     width: 200px;
   }
 
   .app-main {
-    margin-left: 200px;
+    margin-left: 68px;
   }
 
   .topbar {
@@ -477,6 +537,14 @@ a {
     padding: 12px 18px;
     border-right: 0;
     border-bottom: 1px solid var(--warna-garis);
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .sidebar:hover,
+  .sidebar:focus-within {
+    width: auto;
+    box-shadow: none;
   }
 
   .brand {
@@ -486,6 +554,20 @@ a {
   .brand-mark {
     width: 34px;
     height: 34px;
+  }
+
+  .brand-name {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
+  }
+
+  .nav-label {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
   }
 
   .sidebar-label,

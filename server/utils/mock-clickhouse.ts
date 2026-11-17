@@ -2181,7 +2181,10 @@ export class MockClickHouseClient {
 
     const allRows = parsed.data
     let dataRows = allRows
-    if (format === 'CSVWithNames') {
+    const skipFirstLines = Number(clickhouse_settings.input_format_csv_skip_first_lines ?? 0)
+    if (skipFirstLines > 0) {
+      dataRows = allRows.slice(skipFirstLines)
+    } else if (format === 'CSVWithNames') {
       if (allRows.length === 0) {
         throw new Error('CSVWithNames payload has no header row')
       }

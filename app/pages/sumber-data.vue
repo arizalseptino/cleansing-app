@@ -324,20 +324,111 @@
         </div>
 
         <div v-if="ingestMode === 'file'" class="ingest-input-panel">
-          <label class="ingest-label" for="ingest-file-input">
-            Pilih file CSV, TSV, atau TXT (UTF-8, maks. 50 MB)
-          </label>
           <input
             id="ingest-file-input"
             ref="fileInputRef"
             type="file"
+            class="sr-only-file-input"
             accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
             :disabled="ingestInspectPending || ingestCommitPending"
             @change="handleIngestFileChange"
           />
-          <p v-if="ingestFile" class="ingest-meta-hint">
-            File dipilih: <strong>{{ ingestFile.name }}</strong> ({{ formatFileSize(ingestFile.size) }})
-          </p>
+
+          <!-- Dropzone modern saat belum ada file dipilih -->
+          <div
+            v-if="!ingestFile"
+            class="modern-dropzone"
+            :class="{
+              'modern-dropzone--active': isDragging,
+              'modern-dropzone--disabled': ingestInspectPending || ingestCommitPending
+            }"
+            role="button"
+            tabindex="0"
+            aria-label="Area unggah file. Klik atau seret file CSV, TSV, atau TXT ke sini"
+            @click="triggerFileInput"
+            @keydown.enter.prevent="triggerFileInput"
+            @keydown.space.prevent="triggerFileInput"
+            @dragover.prevent="handleDragOver"
+            @dragleave.prevent="handleDragLeave"
+            @drop.prevent="handleFileDrop"
+          >
+            <div class="dropzone-icon-circle">
+              <svg viewBox="0 0 24 24" fill="none" class="dropzone-svg" aria-hidden="true">
+                <path d="M7 16a4 4 0 0 1-.88-7.903A5 5 0 1 1 15.9 6L16 6a5 5 0 0 1 1 9.9M15 13l-3-3m0 0l-3 3m3-3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <div class="dropzone-text">
+              <p class="dropzone-title">
+                <strong>Klik untuk memilih</strong> atau tarik &amp; lepas file ke sini
+              </p>
+              <p class="dropzone-subtitle">
+                Mendukung format <strong>CSV, TSV, atau TXT</strong> (UTF-8, maks. 50 MB)
+              </p>
+            </div>
+            <div class="dropzone-badge-pill">
+              <svg viewBox="0 0 24 24" fill="none" class="badge-icon" aria-hidden="true">
+                <path d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Pilih dari Komputer
+            </div>
+          </div>
+
+          <!-- Card preview file modern saat file terpilih -->
+          <div v-else class="selected-file-card">
+            <div class="selected-file-main">
+              <div class="selected-file-badge">
+                <svg viewBox="0 0 24 24" fill="none" class="file-card-svg" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                <span class="file-ext-tag">{{ getFileExtension(ingestFile.name) }}</span>
+              </div>
+              <div class="selected-file-info">
+                <div class="selected-file-title-row">
+                  <span class="selected-file-name" :title="ingestFile.name">{{ ingestFile.name }}</span>
+                  <span class="file-status-pill" :class="{ 'file-status-pill--pending': ingestInspectPending }">
+                    <span class="file-status-dot"></span>
+                    {{ ingestInspectPending ? 'Memeriksa...' : 'Siap diimpor' }}
+                  </span>
+                </div>
+                <div class="selected-file-meta">
+                  <span>{{ formatFileSize(ingestFile.size) }}</span>
+                  <span class="meta-dot">·</span>
+                  <span>{{ ingestFile.type || 'text/plain' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="selected-file-actions">
+              <button
+                type="button"
+                class="file-action-btn file-action-btn--change"
+                title="Ganti dengan file lain"
+                :disabled="ingestInspectPending || ingestCommitPending"
+                @click="triggerFileInput"
+              >
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 0 0 4.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 0 1-15.357-2m15.357 2H15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Ganti file
+              </button>
+              <button
+                type="button"
+                class="file-action-btn file-action-btn--remove"
+                title="Hapus file terpilih"
+                :disabled="ingestInspectPending || ingestCommitPending"
+                @click="clearIngestFile"
+              >
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                Hapus
+              </button>
+            </div>
+          </div>
         </div>
 
         <div v-else class="ingest-input-panel">
@@ -859,6 +950,7 @@ const showIngestModal = ref(false)
 const ingestMode = ref<'file' | 'text'>('file')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const ingestFile = ref<File | null>(null)
+const isDragging = ref(false)
 const ingestPastedText = ref('')
 const ingestDelimiter = ref<string>('auto')
 const ingestInspection = ref<IngestInspectResponse | null>(null)
@@ -926,6 +1018,10 @@ function openIngestModal() {
   showIngestModal.value = true
   ingestMode.value = 'file'
   ingestFile.value = null
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+  isDragging.value = false
   ingestPastedText.value = ''
   ingestDelimiter.value = 'auto'
   ingestInspection.value = null
@@ -942,6 +1038,7 @@ function openIngestModal() {
 function closeIngestModal() {
   if (ingestCommitPending.value) return
   showIngestModal.value = false
+  isDragging.value = false
 }
 
 function handleIngestKeydown(event: KeyboardEvent) {
@@ -968,19 +1065,50 @@ function resetInspectionOnEdit() {
   ingestDelimiter.value = 'auto'
 }
 
-function handleIngestFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0] ?? null
+function triggerFileInput() {
+  if (ingestInspectPending.value || ingestCommitPending.value) return
+  fileInputRef.value?.click()
+}
+
+function handleDragOver() {
+  if (ingestInspectPending.value || ingestCommitPending.value) return
+  isDragging.value = true
+}
+
+function handleDragLeave() {
+  isDragging.value = false
+}
+
+function handleFileDrop(event: DragEvent) {
+  isDragging.value = false
+  if (ingestInspectPending.value || ingestCommitPending.value) return
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  processSelectedFile(file)
+}
+
+function clearIngestFile() {
+  ingestFile.value = null
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+  resetInspectionOnEdit()
+}
+
+function getFileExtension(name: string): string {
+  const parts = name.split('.')
+  if (parts.length > 1) {
+    return parts.pop()!.toUpperCase()
+  }
+  return 'FILE'
+}
+
+function processSelectedFile(file: File) {
   ingestInspection.value = null
   ingestEditedColumns.value = []
   ingestInspectError.value = ''
   ingestCommitError.value = ''
   ingestDelimiter.value = 'auto'
-
-  if (!file) {
-    ingestFile.value = null
-    return
-  }
 
   const lower = file.name.toLowerCase()
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
@@ -1009,6 +1137,16 @@ function handleIngestFileChange(event: Event) {
     ingestTargetTable.value = suggestTableNameFromFilename(file.name)
   }
   void runIngestInspect(true)
+}
+
+function handleIngestFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  if (!file) {
+    ingestFile.value = null
+    return
+  }
+  processSelectedFile(file)
 }
 
 async function runIngestInspect(autoDelimiter = false) {
@@ -1627,10 +1765,317 @@ onMounted(loadDatabases)
   font-weight: 650;
 }
 
-.ingest-input-panel input[type='file'] {
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
+.sr-only-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Modern Dropzone */
+.modern-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 30px 20px;
+  border: 2px dashed #b7cde3;
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.modern-dropzone:hover {
+  border-color: var(--warna-utama);
+  background: #f0f7fd;
+  transform: translateY(-1px);
+}
+
+.modern-dropzone:focus-visible {
+  outline: 2px solid var(--warna-utama);
+  outline-offset: 2px;
+}
+
+.modern-dropzone--active {
+  border-color: var(--warna-utama);
+  background: #e4f0fc;
+  box-shadow: 0 0 0 4px rgba(87, 152, 215, 0.15);
+}
+
+.modern-dropzone--disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.dropzone-icon-circle {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: #e6f1fa;
+  color: var(--warna-utama);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.modern-dropzone:hover .dropzone-icon-circle {
+  transform: scale(1.08);
+  background: #d8ebfa;
+}
+
+.dropzone-svg {
+  width: 25px;
+  height: 25px;
+}
+
+.dropzone-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropzone-title {
+  margin: 0;
+  color: #1a2b3c;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.dropzone-title strong {
+  color: var(--warna-utama);
+  font-weight: 700;
+}
+
+.dropzone-subtitle {
+  margin: 0;
+  color: #718196;
+  font-size: 12px;
+}
+
+.dropzone-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid #d3e2ed;
+  color: #3b5066;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(34, 72, 112, 0.04);
+  transition: all 0.15s ease;
+}
+
+.modern-dropzone:hover .dropzone-badge-pill {
+  border-color: var(--warna-utama);
+  color: var(--warna-utama);
+}
+
+.badge-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Selected File Card */
+.selected-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid #cce0f0;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(34, 72, 112, 0.05);
+  animation: fileCardFadeIn 0.22s ease-out;
+}
+
+@keyframes fileCardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.selected-file-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.selected-file-badge {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 48px;
+  border-radius: 8px;
+  background: #e8f3fc;
+  color: var(--warna-utama);
+  flex-shrink: 0;
+}
+
+.file-card-svg {
+  width: 24px;
+  height: 24px;
+}
+
+.file-ext-tag {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--warna-utama);
+  color: #fff;
+  line-height: 1.1;
+}
+
+.selected-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.selected-file-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.selected-file-name {
+  color: #1a2b3c;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.file-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: #eef7eb;
+  color: #3b7428;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.file-status-pill--pending {
+  background: #eaf3fb;
+  color: #2b6cb0;
+}
+
+.file-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #52a435;
+}
+
+.file-status-pill--pending .file-status-dot {
+  background-color: #5798d7;
+  animation: pulseDot 1s infinite alternate;
+}
+
+@keyframes pulseDot {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+.selected-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #718196;
+  font-size: 12px;
+}
+
+.meta-dot {
+  color: #a0aec0;
+}
+
+.selected-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.file-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.file-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.file-action-btn--change {
+  background: #f0f6fc;
+  border-color: #d1e2f2;
+  color: #2c4966;
+}
+
+.file-action-btn--change:hover:not(:disabled) {
+  background: #e2effa;
+  border-color: var(--warna-utama);
+  color: var(--warna-utama);
+}
+
+.file-action-btn--remove {
+  background: #fff5f5;
+  border-color: #fed7d7;
+  color: #c53030;
+}
+
+.file-action-btn--remove:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fc8181;
+  color: #9b2c2c;
+}
+
+.file-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ingest-input-panel textarea,
