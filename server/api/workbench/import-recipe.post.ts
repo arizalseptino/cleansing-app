@@ -72,6 +72,12 @@ function validateParamValue(
       if (!Number.isFinite(num)) {
         reject(400, 'Parameter angka tidak valid', `${label} harus berupa angka yang valid.`)
       }
+      if (def.min !== undefined && num < def.min) {
+        reject(400, 'Parameter angka terlalu kecil', `${label} minimal bernilai ${def.min}.`)
+      }
+      if (def.max !== undefined && num > def.max) {
+        reject(400, 'Parameter angka terlalu besar', `${label} maksimal bernilai ${def.max}.`)
+      }
       return num
     }
     case 'boolean': {

@@ -37,7 +37,7 @@ type Token =
 
 type ExprNode =
   | { kind: 'literal'; value: unknown }
-  | { kind: 'ident'; name: string }
+  | { kind: 'ident'; name: string; qualifier?: string }
   | { kind: 'call'; name: string; args: ExprNode[]; over?: { partitionBy: ExprNode[]; orderBy: OrderItem[] } }
   | { kind: 'unary'; op: string; expr: ExprNode }
   | { kind: 'binary'; op: string; left: ExprNode; right: ExprNode }
@@ -54,14 +54,26 @@ type OrderItem = {
 }
 
 type SelectProjection =
-  | { kind: 'star'; except: string[]; replace: Array<{ expr: ExprNode; alias: string }> }
+  | { kind: 'star'; qualifier?: string; except: string[]; replace: Array<{ expr: ExprNode; alias: string }> }
   | { kind: 'expr'; expr: ExprNode; alias: string }
+
+type FromSource =
+  | { kind: 'table'; database: string; table: string; alias?: string }
+  | { kind: 'subquery'; query: QueryNode; alias?: string }
+
+type JoinClause = {
+  type: 'LEFT' | 'CROSS' | 'INNER'
+  source: FromSource
+  on?: ExprNode
+}
 
 type SelectQuery = {
   kind: 'select'
+  distinct?: boolean
   withCte?: { expr: SelectQuery; alias: string }
   projections: SelectProjection[]
-  from?: { kind: 'table'; database: string; table: string } | { kind: 'subquery'; query: QueryNode }
+  from?: FromSource
+  joins?: JoinClause[]
   where?: ExprNode
   groupBy?: ExprNode[]
   having?: ExprNode
@@ -251,8 +263,8 @@ function tokenize(sql: string): Token[] {
           if (next === 'n') val += '\n'
           else if (next === 't') val += '\t'
           else if (next === 'r') val += '\r'
-          else if (next === 's') val += '\\s'
-          else val += next
+          else if (next === '\\' || next === "'") val += next
+          else val += `\\${next}`
           i += 2
         } else if (sql[i] === "'" && sql[i + 1] === "'") {
           val += "'"
@@ -407,6 +419,38 @@ class SqlParser {
     return queries.length === 1 ? first : { kind: 'union', queries }
   }
 
+  private parseFromSource(): FromSource {
+    let source: FromSource
+    if (this.matchPunct('(')) {
+      const sub = this.parseQuery()
+      this.expectPunct(')')
+      source = { kind: 'subquery', query: sub }
+    } else {
+      const firstTok = this.next()
+      const firstName = firstTok?.type === 'ident' ? firstTok.value : ''
+      if (this.matchPunct('.')) {
+        const secondTok = this.next()
+        const secondName = secondTok?.type === 'ident' ? secondTok.value : ''
+        source = { kind: 'table', database: firstName, table: secondName }
+      } else {
+        source = { kind: 'table', database: 'default', table: firstName }
+      }
+    }
+    this.matchKeyword('FINAL')
+    if (this.matchKeyword('AS')) {
+      const aliasTok = this.next()
+      if (aliasTok?.type === 'ident') source.alias = aliasTok.value
+    } else {
+      const next = this.peek()
+      const stopWords = ['WHERE', 'LEFT', 'RIGHT', 'INNER', 'CROSS', 'JOIN', 'ON', 'GROUP', 'HAVING', 'QUALIFY', 'ORDER', 'LIMIT', 'OFFSET', 'UNION', 'FINAL']
+      if (next?.type === 'ident' && (next.quoted || !stopWords.includes(next.value.toUpperCase()))) {
+        this.next()
+        source.alias = next.value
+      }
+    }
+    return source
+  }
+
   parseSelect(): SelectQuery {
     let withCte: { expr: SelectQuery; alias: string } | undefined
     if (this.matchKeyword('WITH')) {
@@ -423,9 +467,20 @@ class SqlParser {
       throw new Error('Expected SELECT')
     }
 
+    const distinct = this.matchKeyword('DISTINCT')
+
     const projections: SelectProjection[] = []
     do {
-      if (this.matchOp('*')) {
+      const isQualifiedStar = this.peek()?.type === 'ident'
+        && this.peek(1)?.type === 'punct' && this.peek(1)?.value === '.'
+        && this.peek(2)?.type === 'op' && this.peek(2)?.value === '*'
+      if (isQualifiedStar || this.matchOp('*')) {
+        let qualifier: string | undefined
+        if (isQualifiedStar) {
+          qualifier = (this.next() as { value: string }).value
+          this.next()
+          this.next()
+        }
         const except: string[] = []
         const replace: Array<{ expr: ExprNode; alias: string }> = []
         while (this.isKeyword('EXCEPT') || this.isKeyword('REPLACE')) {
@@ -449,7 +504,7 @@ class SqlParser {
             this.expectPunct(')')
           }
         }
-        projections.push({ kind: 'star', except, replace })
+        projections.push({ kind: 'star', qualifier, except, replace })
       } else {
         const startPos = this.pos
         const expr = this.parseExpr()
@@ -466,24 +521,28 @@ class SqlParser {
       }
     } while (this.matchPunct(','))
 
-    let from: SelectQuery['from']
+    let from: FromSource | undefined
+    const joins: JoinClause[] = []
     if (this.matchKeyword('FROM')) {
-      if (this.matchPunct('(')) {
-        const sub = this.parseQuery()
-        this.expectPunct(')')
-        from = { kind: 'subquery', query: sub }
-      } else {
-        const firstTok = this.next()
-        const firstName = firstTok?.type === 'ident' ? firstTok.value : ''
-        if (this.matchPunct('.')) {
-          const secondTok = this.next()
-          const secondName = secondTok?.type === 'ident' ? secondTok.value : ''
-          from = { kind: 'table', database: firstName, table: secondName }
-        } else {
-          from = { kind: 'table', database: 'default', table: firstName }
+      from = this.parseFromSource()
+      while (this.isKeyword('LEFT') || this.isKeyword('CROSS') || this.isKeyword('INNER') || this.isKeyword('JOIN')) {
+        let type: JoinClause['type'] = 'INNER'
+        if (this.matchKeyword('LEFT')) {
+          this.matchKeyword('OUTER')
+          type = 'LEFT'
+        } else if (this.matchKeyword('CROSS')) {
+          type = 'CROSS'
+        } else if (this.matchKeyword('INNER')) {
+          type = 'INNER'
         }
+        this.matchKeyword('JOIN')
+        const source = this.parseFromSource()
+        let on: ExprNode | undefined
+        if (this.matchKeyword('ON')) {
+          on = this.parseExpr()
+        }
+        joins.push({ type, source, on })
       }
-      this.matchKeyword('FINAL')
     }
 
     let where: ExprNode | undefined
@@ -544,9 +603,11 @@ class SqlParser {
 
     return {
       kind: 'select',
+      distinct,
       withCte,
       projections,
       from,
+      joins,
       where,
       groupBy,
       having,
@@ -770,6 +831,10 @@ class SqlParser {
         }
         return { kind: 'call', name: t.value, args, over }
       }
+      if (this.matchPunct('.')) {
+        const colTok = this.next()
+        return { kind: 'ident', qualifier: t.value, name: colTok?.type === 'ident' ? colTok.value : '' }
+      }
       return { kind: 'ident', name: t.value }
     }
 
@@ -866,9 +931,10 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
   }
   if (expr.kind === 'call') {
     const fn = expr.name.toLowerCase()
-    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniqexact') return 'UInt64'
-    if (fn === 'isnull' || fn === 'notempty' || fn === 'startswith' || fn === 'match') return 'UInt8'
+    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64') return 'UInt64'
+    if (fn === 'isnull' || fn === 'notempty' || fn === 'empty' || fn === 'startswith' || fn === 'match' || fn === 'touint8') return 'UInt8'
     if (fn === 'position' || fn === 'positioncaseinsensitiveutf8' || fn === 'lengthutf8' || fn === 'length') return 'UInt64'
+    if (fn === 'jarowinklersimilarity' || fn === 'tofloat64' || fn === 'greatest' || fn === 'least') return 'Float64'
     if (fn === 'cast' && expr.args[1]?.kind === 'literal') return String(expr.args[1].value)
     if (fn === 'if' && expr.args.length >= 3) {
       const t1 = inferExprType(expr.args[1], inputColumns)
@@ -877,8 +943,11 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
       if (t2 === 'Nullable(Nothing)') return t1.startsWith('Nullable(') ? t1 : `Nullable(${t1})`
       return t1
     }
-    if (fn === 'trimboth' || fn === 'upperutf8' || fn === 'lowerutf8' || fn === 'initcap' || fn === 'replaceregexpall') {
+    if (fn === 'trimboth' || fn === 'upperutf8' || fn === 'lowerutf8' || fn === 'initcap' || fn === 'replaceregexpall' || fn === 'any') {
       return expr.args[0] ? inferExprType(expr.args[0], inputColumns) : 'String'
+    }
+    if ((fn === 'max' || fn === 'min') && expr.args[0]) {
+      return inferExprType(expr.args[0], inputColumns)
     }
   }
   if (expr.kind === 'case') {
@@ -891,8 +960,79 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
   return 'String'
 }
 
+function jaroWinklerSimilarity(rawA: string, rawB: string): number {
+  const a = [...rawA]
+  const b = [...rawB]
+  const lenA = a.length
+  const lenB = b.length
+  if (lenA === 0 && lenB === 0) return 1
+  if (lenA === 0 || lenB === 0) return 0
+
+  const matchDistance = Math.max(0, Math.floor(Math.max(lenA, lenB) / 2) - 1)
+  const aMatched = new Array<boolean>(lenA).fill(false)
+  const bMatched = new Array<boolean>(lenB).fill(false)
+
+  let matches = 0
+  for (let i = 0; i < lenA; i += 1) {
+    const start = Math.max(0, i - matchDistance)
+    const end = Math.min(i + matchDistance + 1, lenB)
+    for (let j = start; j < end; j += 1) {
+      if (bMatched[j] || a[i] !== b[j]) continue
+      aMatched[i] = true
+      bMatched[j] = true
+      matches += 1
+      break
+    }
+  }
+
+  if (matches === 0) return 0
+
+  let transpositions = 0
+  let k = 0
+  for (let i = 0; i < lenA; i += 1) {
+    if (!aMatched[i]) continue
+    while (!bMatched[k]) k += 1
+    if (a[i] !== b[k]) transpositions += 1
+    k += 1
+  }
+
+  const jaro = (matches / lenA + matches / lenB + (matches - transpositions / 2) / matches) / 3
+  let prefix = 0
+  const maxPrefix = Math.min(4, lenA, lenB)
+  while (prefix < maxPrefix && a[prefix] === b[prefix]) {
+    prefix += 1
+  }
+  return jaro + prefix * 0.1 * (1 - jaro)
+}
+
+function editDistanceUtf8(rawA: string, rawB: string): number {
+  const a = [...rawA]
+  const b = [...rawB]
+  const m = a.length
+  const n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+
+  let prev = new Array<number>(n + 1)
+  let curr = new Array<number>(n + 1)
+  for (let j = 0; j <= n; j += 1) prev[j] = j
+
+  for (let i = 1; i <= m; i += 1) {
+    curr[0] = i
+    for (let j = 1; j <= n; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+    }
+    const tmp = prev
+    prev = curr
+    curr = tmp
+  }
+  return prev[n]
+}
+
 export class MockClickHouseClient {
   private databases = createInitialDatabases()
+  private rowScopes = new WeakMap<Record<string, unknown>, Map<string, Record<string, unknown>>>()
 
   private getSystemRows(table: string): Record<string, unknown>[] {
     if (table === 'databases') {
@@ -975,6 +1115,10 @@ export class MockClickHouseClient {
       case 'literal':
         return expr.value
       case 'ident':
+        if (expr.qualifier) {
+          const scoped = this.rowScopes.get(row)?.get(expr.qualifier)
+          if (scoped && expr.name in scoped) return scoped[expr.name]
+        }
         if (expr.name in row) return row[expr.name]
         if (ctes.has(expr.name)) return ctes.get(expr.name)
         return undefined
@@ -1061,6 +1205,10 @@ export class MockClickHouseClient {
       const v = this.evalExpr(args[0], row, ctes)
       return v === null || v === undefined ? null : String(v)
     }
+    if (fn === 'empty') {
+      const v = this.evalExpr(args[0], row, ctes)
+      return v === null || v === undefined || String(v).length === 0 ? 1 : 0
+    }
     if (fn === 'notempty') {
       const v = this.evalExpr(args[0], row, ctes)
       return v !== null && v !== undefined && String(v).length > 0 ? 1 : 0
@@ -1087,7 +1235,36 @@ export class MockClickHouseClient {
       if (v === null || v === undefined) return null
       const pat = String(this.evalExpr(args[1], row, ctes) ?? '')
       const rep = String(this.evalExpr(args[2], row, ctes) ?? '')
-      return String(v).replace(new RegExp(pat, 'g'), rep)
+      const flags = /\\[pP]\{/.test(pat) ? 'gu' : 'g'
+      return String(v).replace(new RegExp(pat, flags), rep)
+    }
+    if (fn === 'jarowinklersimilarity') {
+      const a = this.evalExpr(args[0], row, ctes)
+      const b = this.evalExpr(args[1], row, ctes)
+      return jaroWinklerSimilarity(String(a ?? ''), String(b ?? ''))
+    }
+    if (fn === 'editdistanceutf8' || fn === 'editdistance') {
+      const a = this.evalExpr(args[0], row, ctes)
+      const b = this.evalExpr(args[1], row, ctes)
+      return editDistanceUtf8(String(a ?? ''), String(b ?? ''))
+    }
+    if (fn === 'greatest') {
+      const vals = args.map((a) => this.evalExpr(a, row, ctes)).filter((v) => v !== null && v !== undefined)
+      if (vals.length === 0) return null
+      return vals.reduce((acc, v) => (compareValues(v, acc) > 0 ? v : acc))
+    }
+    if (fn === 'least') {
+      const vals = args.map((a) => this.evalExpr(a, row, ctes)).filter((v) => v !== null && v !== undefined)
+      if (vals.length === 0) return null
+      return vals.reduce((acc, v) => (compareValues(v, acc) < 0 ? v : acc))
+    }
+    if (fn === 'tofloat64') {
+      const v = this.evalExpr(args[0], row, ctes)
+      return v === null || v === undefined ? 0 : Number(v)
+    }
+    if (fn === 'touint8' || fn === 'touint64' || fn === 'toint64') {
+      const v = this.evalExpr(args[0], row, ctes)
+      return v === null || v === undefined ? 0 : Math.trunc(Number(v))
     }
     if (fn === 'if') {
       return toBool(this.evalExpr(args[0], row, ctes))
@@ -1237,7 +1414,7 @@ export class MockClickHouseClient {
   private containsAggregate(expr: ExprNode): boolean {
     if (expr.kind === 'call') {
       const fn = expr.name.toLowerCase()
-      if (['count', 'countif', 'sum', 'uniqexact', 'groupuniqarray'].includes(fn)) return true
+      if (['count', 'countif', 'sum', 'uniqexact', 'groupuniqarray', 'max', 'min', 'any', 'argmax'].includes(fn)) return true
       return expr.args.some((a) => this.containsAggregate(a))
     }
     if (expr.kind === 'binary') return this.containsAggregate(expr.left) || this.containsAggregate(expr.right)
@@ -1258,6 +1435,36 @@ export class MockClickHouseClient {
       }
       if (fn === 'sum') {
         return groupRows.reduce((acc, r) => acc + Number(this.evalExpr(expr.args[0], r, ctes) ?? 0), 0)
+      }
+      if (fn === 'max') {
+        const vals = groupRows.map((r) => this.evalExpr(expr.args[0], r, ctes)).filter((v) => v !== null && v !== undefined)
+        if (!vals.length) return null
+        return vals.reduce((acc, v) => (compareValues(v, acc) > 0 ? v : acc))
+      }
+      if (fn === 'min') {
+        const vals = groupRows.map((r) => this.evalExpr(expr.args[0], r, ctes)).filter((v) => v !== null && v !== undefined)
+        if (!vals.length) return null
+        return vals.reduce((acc, v) => (compareValues(v, acc) < 0 ? v : acc))
+      }
+      if (fn === 'any') {
+        for (const r of groupRows) {
+          const v = this.evalExpr(expr.args[0], r, ctes)
+          if (v !== null && v !== undefined) return v
+        }
+        return groupRows[0] ? this.evalExpr(expr.args[0], groupRows[0], ctes) : null
+      }
+      if (fn === 'argmax') {
+        if (!groupRows.length) return null
+        let bestVal = this.evalExpr(expr.args[0], groupRows[0], ctes)
+        let bestWeight = this.evalExpr(expr.args[1], groupRows[0], ctes)
+        for (let i = 1; i < groupRows.length; i += 1) {
+          const w = this.evalExpr(expr.args[1], groupRows[i], ctes)
+          if (compareValues(w, bestWeight) > 0) {
+            bestWeight = w
+            bestVal = this.evalExpr(expr.args[0], groupRows[i], ctes)
+          }
+        }
+        return bestVal
       }
       if (fn === 'uniqexact') {
         const seen = new Set(groupRows.map((r) => JSON.stringify(this.evalExpr(expr.args[0], r, ctes))))
@@ -1298,7 +1505,30 @@ export class MockClickHouseClient {
       if (expr.op === 'NOT') return toBool(v) ? 0 : 1
       if (expr.op === '-') return -Number(v ?? 0)
     }
+    if (expr.kind === 'call' && this.containsAggregate(expr)) {
+      const evaluatedArgs: ExprNode[] = expr.args.map((a) =>
+        this.containsAggregate(a)
+          ? { kind: 'literal', value: this.evalAggregateExpr(a, groupRows, ctes) }
+          : a,
+      )
+      return this.evalCall(expr.name, evaluatedArgs, groupRows[0] ?? {}, ctes)
+    }
+    if (expr.kind === 'case' && this.containsAggregate(expr)) {
+      for (const branch of expr.branches) {
+        if (toBool(this.evalAggregateExpr(branch.when, groupRows, ctes))) {
+          return this.evalAggregateExpr(branch.then, groupRows, ctes)
+        }
+      }
+      return expr.elseExpr ? this.evalAggregateExpr(expr.elseExpr, groupRows, ctes) : null
+    }
     return groupRows[0] ? this.evalExpr(expr, groupRows[0], ctes) : null
+  }
+
+  private evalFromSource(source: FromSource, ctes: Map<string, unknown>): EvalResult {
+    if (source.kind === 'table') {
+      return this.getTable(source.database, source.table)
+    }
+    return this.evalQuery(source.query, ctes)
   }
 
   private evalSelect(select: SelectQuery, ctes = new Map<string, unknown>()): EvalResult {
@@ -1310,18 +1540,84 @@ export class MockClickHouseClient {
       localCtes.set(select.withCte.alias, cteVal)
     }
 
+    const columnsByScope = new Map<string, MockColumn[]>()
     let input: EvalResult
     if (!select.from) {
       input = { columns: [], rows: [{}] }
-    } else if (select.from.kind === 'table') {
-      input = this.getTable(select.from.database, select.from.table)
     } else {
-      input = this.evalQuery(select.from.query, localCtes)
+      const baseRes = this.evalFromSource(select.from, localCtes)
+      const baseAlias = select.from.alias ?? (select.from.kind === 'table' ? select.from.table : undefined)
+      if (baseAlias) columnsByScope.set(baseAlias, baseRes.columns)
+      let currentColumns = [...baseRes.columns]
+      let currentRows = baseRes.rows.map((r) => {
+        const copy = { ...r }
+        if (baseAlias) {
+          const map = new Map<string, Record<string, unknown>>()
+          map.set(baseAlias, r)
+          this.rowScopes.set(copy, map)
+        }
+        return copy
+      })
+
+      for (const join of select.joins ?? []) {
+        const rightRes = this.evalFromSource(join.source, localCtes)
+        const rightAlias = join.source.alias ?? (join.source.kind === 'table' ? join.source.table : undefined)
+        if (rightAlias) columnsByScope.set(rightAlias, rightRes.columns)
+        const nullRightRow: Record<string, unknown> = {}
+        for (const col of rightRes.columns) {
+          nullRightRow[col.name] = null
+        }
+
+        const nextRows: Record<string, unknown>[] = []
+        for (const leftRow of currentRows) {
+          const leftScope = this.rowScopes.get(leftRow)
+          let matchedAny = false
+
+          for (const rightRow of rightRes.rows) {
+            const combined: Record<string, unknown> = { ...leftRow, ...rightRow }
+            const nextScope = new Map(leftScope ?? [])
+            if (rightAlias) nextScope.set(rightAlias, rightRow)
+            this.rowScopes.set(combined, nextScope)
+
+            if (join.type === 'CROSS' || !join.on || toBool(this.evalExpr(join.on, combined, localCtes))) {
+              matchedAny = true
+              nextRows.push(combined)
+            }
+          }
+
+          if (join.type === 'LEFT' && !matchedAny) {
+            const combined: Record<string, unknown> = { ...leftRow, ...nullRightRow }
+            const nextScope = new Map(leftScope ?? [])
+            if (rightAlias) nextScope.set(rightAlias, nullRightRow)
+            this.rowScopes.set(combined, nextScope)
+            nextRows.push(combined)
+          }
+        }
+
+        currentColumns = [...currentColumns, ...rightRes.columns]
+        currentRows = nextRows
+      }
+
+      input = { columns: currentColumns, rows: currentRows }
     }
 
     let rows = input.rows
     if (select.where) {
       rows = rows.filter((r) => toBool(this.evalExpr(select.where!, r, localCtes)))
+    }
+
+    const dedupeOutputRows = (columns: MockColumn[], list: Record<string, unknown>[]): Record<string, unknown>[] => {
+      if (!select.distinct) return list
+      const seen = new Set<string>()
+      const unique: Record<string, unknown>[] = []
+      for (const r of list) {
+        const k = JSON.stringify(columns.map((c) => r[c.name] ?? null))
+        if (!seen.has(k)) {
+          seen.add(k)
+          unique.push(r)
+        }
+      }
+      return unique
     }
 
     const hasWindow = select.projections.some((p) => p.kind === 'expr' && p.expr.kind === 'call' && p.expr.over)
@@ -1362,7 +1658,7 @@ export class MockClickHouseClient {
         }
         outRows.push(outRow)
       }
-      return this.applyPostClauses(select, outColumns, outRows, localCtes)
+      return this.applyPostClauses(select, outColumns, dedupeOutputRows(outColumns, outRows), localCtes)
     }
 
     // Handle window functions like row_number() OVER (...)
@@ -1398,13 +1694,20 @@ export class MockClickHouseClient {
     let builtColumns = false
     const outRows: Record<string, unknown>[] = []
 
+    const starColsFor = (qualifier?: string): MockColumn[] => {
+      if (qualifier && columnsByScope.has(qualifier)) return columnsByScope.get(qualifier)!
+      return input.columns
+    }
+
     const computeRow = (r: Record<string, unknown>, rowIndex: number): Record<string, unknown> => {
       const outRow: Record<string, unknown> = {}
+      const scopes = this.rowScopes.get(r)
       for (const proj of select.projections) {
         if (proj.kind === 'star') {
           const exceptSet = new Set(proj.except)
           const replaceMap = new Map(proj.replace.map((item) => [item.alias, item.expr]))
-          for (const col of input.columns) {
+          const scopedRow = proj.qualifier && scopes?.get(proj.qualifier) ? scopes.get(proj.qualifier)! : r
+          for (const col of starColsFor(proj.qualifier)) {
             if (exceptSet.has(col.name)) continue
             const replaceExpr = replaceMap.get(col.name)
             if (replaceExpr) {
@@ -1413,7 +1716,7 @@ export class MockClickHouseClient {
                 outColumns.push({ name: col.name, type: inferExprType(replaceExpr, input.columns) })
               }
             } else {
-              outRow[col.name] = r[col.name]
+              outRow[col.name] = scopedRow[col.name]
               if (!builtColumns) outColumns.push({ ...col })
             }
           }
@@ -1438,7 +1741,7 @@ export class MockClickHouseClient {
         if (proj.kind === 'star') {
           const exceptSet = new Set(proj.except)
           const replaceMap = new Map(proj.replace.map((item) => [item.alias, item.expr]))
-          for (const col of input.columns) {
+          for (const col of starColsFor(proj.qualifier)) {
             if (exceptSet.has(col.name)) continue
             const replaceExpr = replaceMap.get(col.name)
             outColumns.push({
@@ -1454,7 +1757,7 @@ export class MockClickHouseClient {
       rows.forEach((r, idx) => outRows.push(computeRow(r, idx)))
     }
 
-    return this.applyPostClauses(select, outColumns, outRows, localCtes)
+    return this.applyPostClauses(select, outColumns, dedupeOutputRows(outColumns, outRows), localCtes)
   }
 
   private applyPostClauses(

@@ -44,6 +44,9 @@ export type OperationParamDefinition = {
   allowNew?: boolean
   defaultValue?: unknown
   maxLength?: number
+  min?: number
+  max?: number
+  step?: number
 }
 
 export type OperationDefinition = {
@@ -74,6 +77,8 @@ export type OperationContext = {
     engine: string
     sorting_key: string
   }
+  inputSql?: string
+  inputParams?: Record<string, unknown>
 }
 
 export type StepSchemaStatus = {

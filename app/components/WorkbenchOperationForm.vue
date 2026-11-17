@@ -14,7 +14,7 @@
         :required="parameter.required"
         @change="handleTargetChange(parameter, $event)"
       >
-        <option value="">Pilih kolom</option>
+        <option value="">{{ parameter.required ? 'Pilih kolom' : 'Sama dengan kolom sumber (bawaan)' }}</option>
         <option v-for="column in columnsFor(parameter)" :key="column.name" :value="column.name">
           {{ column.name }} ({{ column.type }})
         </option>
@@ -251,6 +251,9 @@
         :type="parameter.type === 'number' ? 'number' : 'text'"
         :required="parameter.required"
         :maxlength="parameter.maxLength"
+        :min="parameter.min"
+        :max="parameter.max"
+        :step="parameter.step"
       />
     </div>
     <p v-if="formError" class="form-error" role="alert">{{ formError }}</p>
@@ -272,6 +275,9 @@ type Parameter = {
   allowNew?: boolean
   defaultValue?: unknown
   maxLength?: number
+  min?: number
+  max?: number
+  step?: number
 }
 type Operation = {
   id: string
@@ -341,6 +347,12 @@ const optionLabels: Record<string, string> = {
   constant_number: 'Angka tetap',
   sequence: 'Nomor urut',
   combine: 'Gabungkan kolom',
+  similarity: 'Kemiripan teks',
+  keyword: 'Kata kunci',
+  jaro_winkler: 'Jaro-Winkler',
+  edit_distance: 'Jarak edit ternormalisasi',
+  lowercase: 'Huruf kecil',
+  remove_punctuation: 'Hapus tanda baca',
 }
 
 function optionLabel(value: string): string {
@@ -349,6 +361,15 @@ function optionLabel(value: string): string {
 
 function isParameterVisible(parameter: Parameter): boolean {
   if (parameter.key === 'newTargetName') return draft.createTarget === true
+  if (props.operation.id === 'fuzzy_match_master') {
+    if (parameter.key === 'algorithm' || parameter.key === 'threshold' || parameter.key === 'normalization') {
+      return draft.mode === 'similarity'
+    }
+    if (parameter.key === 'unmatchedColumn') {
+      return draft.routeUnmatched === true
+    }
+    return true
+  }
   if (props.operation.id !== 'extract_and_route' || draft.action !== 'extract') return parameter.key !== 'extractPart' && parameter.key !== 'captureGroup'
   if (parameter.key === 'extractPart') return draft.patternType !== 'regex'
   if (parameter.key === 'captureGroup') return draft.patternType === 'regex'
@@ -367,8 +388,13 @@ watch(
     draft.createTarget = props.initialParams?.createTarget === true
     for (const parameter of props.operation.params) {
       const value = props.initialParams?.[parameter.key]
-      if (parameter.type === 'multiselect' || parameter.type === 'columns') draft[parameter.key] = Array.isArray(value) ? [...value] : []
-      else if (parameter.type === 'string-list') {
+      if (parameter.type === 'multiselect' || parameter.type === 'columns') {
+        draft[parameter.key] = Array.isArray(value)
+          ? [...value]
+          : Array.isArray(parameter.defaultValue)
+            ? [...parameter.defaultValue]
+            : []
+      } else if (parameter.type === 'string-list') {
         draft[parameter.key] = Array.isArray(value) ? [...value] : Array.isArray(parameter.defaultValue) ? [...parameter.defaultValue] : []
       }
       else if (parameter.type === 'rules') {
@@ -401,12 +427,16 @@ function isTextColumn(column: Column): boolean {
 }
 
 function columnsFor(parameter: Parameter): Column[] {
-  if (parameter.key.toLowerCase().includes('master')) return props.masterColumns
+  if (parameter.key.toLowerCase().includes('master')) {
+    return props.operation.id === 'fuzzy_match_master'
+      ? props.masterColumns.filter(isTextColumn)
+      : props.masterColumns
+  }
   const textOnly = `${parameter.label} ${parameter.description}`.toLowerCase().includes('teks')
     || props.operation.id === 'trim_text'
     || props.operation.id === 'replace_values'
     || (props.operation.id === 'extract_and_route' && parameter.key === 'targetColumn')
-    || (props.operation.id === 'fill_from_master' && /Column$/.test(parameter.key))
+    || ((props.operation.id === 'fill_from_master' || props.operation.id === 'fuzzy_match_master') && /Column$/.test(parameter.key))
   return textOnly ? props.schema.filter(isTextColumn) : props.schema
 }
 
@@ -539,7 +569,11 @@ function handleTableChange(key: string): void {
 function submit(): void {
   formError.value = ''
   const params: Record<string, unknown> = {}
-  if (props.operation.id === 'extract_and_route') params.createTarget = draft.createTarget === true
+  if (props.operation.params.some((p) => p.allowNew)) params.createTarget = draft.createTarget === true
+  if (props.operation.id === 'fuzzy_match_master' && draft.routeUnmatched === true && !String(draft.unmatchedColumn ?? '').trim()) {
+    formError.value = 'Kolom tujuan nilai tidak cocok wajib dipilih.'
+    return
+  }
   for (const parameter of props.operation.params) {
     const value = draft[parameter.key]
     const missing = parameter.key === 'targetColumn' && parameter.allowNew && draft.createTarget === true

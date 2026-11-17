@@ -61,11 +61,14 @@ export default defineEventHandler(async (event) => {
     previewSql = `SELECT * FROM (${compiled.sql}) WHERE ${condition}`
   }
 
+  const hasFuzzyMatch = Array.isArray(pipeline.steps) && pipeline.steps.some((step: { op?: string }) => step?.op === 'fuzzy_match_master')
+  const previewReadonlySettings = { readonly: 1, max_execution_time: hasFuzzyMatch ? 120 : 30 }
+
   const totalRows = await client.query({
     query: `SELECT count() AS total FROM (${previewSql})`,
     query_params: previewParams,
     format: 'JSONEachRow',
-    clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+    clickhouse_settings: previewReadonlySettings,
   })
   const totalJson = await totalRows.json<{ total: number }[]>()
   const total = Number(totalJson[0]?.total ?? 0)
@@ -79,7 +82,7 @@ export default defineEventHandler(async (event) => {
     query: `SELECT * FROM (${previewSql}) LIMIT ${limit} OFFSET ${offset}`,
     query_params: previewParams,
     format: 'JSON',
-    clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+    clickhouse_settings: previewReadonlySettings,
   })
   const rowsPayload = await rowsResult.json<any>()
   const columns = rowsPayload.meta?.map((meta: { name: string }) => meta.name) ?? []

@@ -250,6 +250,20 @@ function historyTouchedColumns(op: string, params: Record<string, unknown>): str
   if (op === 'fill_from_master') {
     return typeof params.targetColumn === 'string' && params.targetColumn ? [params.targetColumn] : []
   }
+  if (op === 'fuzzy_match_master') {
+    const cols: string[] = []
+    if (params.createTarget === true) {
+      if (typeof params.newTargetName === 'string' && params.newTargetName) cols.push(params.newTargetName)
+    } else if (typeof params.targetColumn === 'string' && params.targetColumn) {
+      cols.push(params.targetColumn)
+    } else if (typeof params.sourceColumn === 'string' && params.sourceColumn) {
+      cols.push(params.sourceColumn)
+    }
+    if (params.routeUnmatched === true && typeof params.unmatchedColumn === 'string' && params.unmatchedColumn) {
+      cols.push(params.unmatchedColumn)
+    }
+    return [...new Set(cols)]
+  }
   return [...new Set(Object.entries(params)
     .filter(([key, value]) => /column/i.test(key) && typeof value === 'string' && value)
     .map(([, value]) => String(value)))]

@@ -1,4 +1,10 @@
 import { compilePipeline } from '../../workbench/compiler'
+import { validateTable } from '../../features/metadata'
+import {
+  buildFuzzyMappingSql,
+  buildNormalizedTextExpr,
+  parseFuzzyParams,
+} from '../../workbench/ops/fuzzy_match_master'
 import { buildInputSql, isTextType, quoteIdentifier } from '../../workbench/utils'
 import type { Pipeline } from '../../workbench/types'
 
@@ -6,6 +12,25 @@ type ColumnStatistics = {
   changed: number
   beforeNullOrEmpty: number | null
   afterNullOrEmpty: number
+}
+
+type FuzzyPairOrder = 'lowest_score' | 'highest_score' | 'most_rows'
+
+type FuzzyMatchStatistics = {
+  uniqueSourceValues: number
+  exactMatches: number
+  fuzzyMatches: number
+  ambiguousMatches: number
+  unmatchedValues: number
+  routedRows: number
+  pairOrder: FuzzyPairOrder
+  pairs: Array<{
+    sourceValue: string
+    masterValue: string | null
+    score: number
+    rowCount: number
+    status: 'exact' | 'fuzzy' | 'ambiguous' | 'unmatched'
+  }>
 }
 
 function badRequest(message: string): never {
@@ -47,6 +72,15 @@ export default defineEventHandler(async (event) => {
     badRequest('Cakupan statistik harus berupa step atau pipeline.')
   }
 
+  const rawPairOrder = 'pairOrder' in body && body.pairOrder !== undefined ? body.pairOrder : 'lowest_score'
+  if (rawPairOrder !== 'lowest_score' && rawPairOrder !== 'highest_score' && rawPairOrder !== 'most_rows') {
+    badRequest('Urutan contoh pasangan harus berupa lowest_score, highest_score, atau most_rows.')
+  }
+  const pairOrder: FuzzyPairOrder = rawPairOrder
+
+  const hasFuzzyMatch = pipeline.steps.some((step) => step?.op === 'fuzzy_match_master')
+  const statsSettings = { readonly: 1, max_execution_time: hasFuzzyMatch ? 120 : 30 }
+
   const client = useClickHouse()
   try {
     let rowsIn: number
@@ -54,6 +88,7 @@ export default defineEventHandler(async (event) => {
     let columns: string[]
     let beforeAlias: (column: string) => string | null
     let deduplicateStepIndex = -1
+    let fuzzyStepIndex = -1
 
     if (scope === 'step') {
       const stepNumber = Number('step' in body ? body.step : 1)
@@ -73,11 +108,12 @@ export default defineEventHandler(async (event) => {
         query: `SELECT count() AS total FROM (${input.sql})`,
         query_params: input.params,
         format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+        clickhouse_settings: statsSettings,
       })
       const [inputCount] = await inputRows.json<{ total: number | string }[]>()
       rowsIn = countValue(inputCount?.total, 'jumlah baris masuk')
       if (steps[steps.length - 1]?.op === 'deduplicate') deduplicateStepIndex = steps.length - 1
+      if (steps[steps.length - 1]?.op === 'fuzzy_match_master') fuzzyStepIndex = steps.length - 1
     } else {
       const initial = await compilePipeline(client, pipeline)
       columns = [...new Set([...initial.touchedColumns, ...initial.addedColumns])]
@@ -92,7 +128,7 @@ export default defineEventHandler(async (event) => {
       const sourceRows = await client.query({
         query: `SELECT count() AS total FROM (${buildInputSql(pipeline.source)})`,
         format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+        clickhouse_settings: statsSettings,
       })
       const [sourceCount] = await sourceRows.json<{ total: number | string }[]>()
       rowsIn = countValue(sourceCount?.total, 'jumlah baris sumber')
@@ -128,7 +164,7 @@ export default defineEventHandler(async (event) => {
       query: `SELECT count() AS rows_out${selected.length ? `, ${selected.flatMap(({ expressions }) => expressions).join(', ')}` : ''} FROM (${compiled.sql})`,
       query_params: compiled.params,
       format: 'JSONEachRow',
-      clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+      clickhouse_settings: statsSettings,
     })
     const [row] = await result.json<Record<string, number | string | null>>()
     if (!row) {
@@ -181,7 +217,7 @@ FROM (
 )`,
         query_params: input.params,
         format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+        clickhouse_settings: statsSettings,
       })
       const [groupRow] = await grouped.json<Record<string, number | string>[]>()
       if (!groupRow) badRequest('Statistik deduplikasi tidak dapat dihitung.')
@@ -189,6 +225,160 @@ FROM (
         duplicateGroups: countValue(groupRow.duplicate_groups, 'jumlah grup duplikat'),
         discardedRows: countValue(groupRow.discarded_rows, 'jumlah baris dibuang'),
         conflictGroups: countValue(groupRow.conflict_groups, 'jumlah grup konflik isi'),
+      }
+    }
+
+    let fuzzyMatch: FuzzyMatchStatistics | undefined
+    if (fuzzyStepIndex >= 0) {
+      const step = pipeline.steps[fuzzyStepIndex]
+      const input = await compilePipeline(client, {
+        ...pipeline,
+        steps: pipeline.steps.slice(0, fuzzyStepIndex),
+      })
+      const parsed = parseFuzzyParams({ schema: input.schema, params: step.params ?? {} })
+      const masterMeta = await validateTable(client, parsed.masterDatabase, parsed.masterTable)
+      const masterIdentifier = `${quoteIdentifier(parsed.masterDatabase)}.${quoteIdentifier(parsed.masterTable)}`
+      const masterFinal = /^(?:Replicated)?ReplacingMergeTree$/.test(masterMeta.engine) ? ' FINAL' : ''
+
+      const mappingSql = buildFuzzyMappingSql({
+        inputSql: `(${input.sql})`,
+        sourceColumn: parsed.sourceColumn,
+        masterIdentifier,
+        masterFinal,
+        masterColumn: parsed.masterColumn,
+        mode: parsed.mode,
+        algorithm: parsed.algorithm,
+        normalizations: parsed.normalizations,
+        thresholdParamName: 'fm_threshold',
+        aliases: {
+          sNorm: '__fm_s_norm',
+          master: '__fm_master',
+          status: '__fm_status',
+          score: '__fm_score',
+        },
+      })
+      const fmParams: Record<string, unknown> = {
+        ...input.params,
+        ...(parsed.mode === 'similarity' ? { fm_threshold: parsed.threshold } : {}),
+      }
+
+      const srcField = quoteIdentifier(parsed.sourceColumn)
+      const srcNormExpr = buildNormalizedTextExpr(srcField, parsed.mode, parsed.normalizations)
+      const srcNonEmpty = `(${srcField} IS NOT NULL AND trimBoth(ifNull(toString(${srcField}), '')) != '' AND ${srcNormExpr} != '')`
+
+      const orderByClause = pairOrder === 'highest_score'
+        ? `if(match_status IN ('exact', 'fuzzy'), 0, 1) ASC, score DESC, row_count DESC, source_value ASC`
+        : pairOrder === 'most_rows'
+          ? `row_count DESC, score ASC, source_value ASC`
+          : `if(match_status IN ('exact', 'fuzzy'), 0, 1) ASC, score ASC, row_count DESC, source_value ASC`
+
+      const summaryPromise = client.query({
+        query: `
+          SELECT
+            count() AS unique_source_values,
+            countIf(__fm_status = 'exact') AS exact_matches,
+            countIf(__fm_status = 'fuzzy') AS fuzzy_matches,
+            countIf(__fm_status = 'ambiguous') AS ambiguous_matches,
+            countIf(__fm_status = 'unmatched') AS unmatched_values
+          FROM (${mappingSql})
+        `,
+        query_params: fmParams,
+        format: 'JSONEachRow',
+        clickhouse_settings: statsSettings,
+      })
+
+      const routedPromise = parsed.routeUnmatched
+        ? (() => {
+            const unmatchedQuoted = quoteIdentifier(parsed.unmatchedColumn)
+            const unmatchedEmpty = `(isNull(s.${unmatchedQuoted}) OR trimBoth(ifNull(toString(s.${unmatchedQuoted}), '')) = '')`
+            return client.query({
+              query: `
+                SELECT
+                  countIf(ifNull(m.__fm_status, '') = 'unmatched' AND ${unmatchedEmpty}) AS routed_rows
+                FROM (
+                  SELECT *, ${srcNormExpr} AS __fm_key
+                  FROM (${input.sql})
+                ) AS s
+                LEFT JOIN (${mappingSql}) AS m
+                ON s.__fm_key = m.__fm_s_norm
+              `,
+              query_params: fmParams,
+              format: 'JSONEachRow',
+              clickhouse_settings: statsSettings,
+            })
+          })()
+        : null
+
+      const pairsPromise = client.query({
+        query: `
+          SELECT
+            g.sample_source AS source_value,
+            if(m.__fm_status IN ('exact', 'fuzzy'), m.__fm_master, CAST(NULL, 'Nullable(String)')) AS master_value,
+            m.__fm_score AS score,
+            g.row_count AS row_count,
+            m.__fm_status AS match_status
+          FROM (
+            SELECT
+              s_norm,
+              any(orig_val) AS sample_source,
+              count() AS row_count
+            FROM (
+              SELECT
+                ${srcNormExpr} AS s_norm,
+                toString(${srcField}) AS orig_val
+              FROM (${input.sql})
+              WHERE ${srcNonEmpty}
+            )
+            GROUP BY s_norm
+          ) AS g
+          LEFT JOIN (${mappingSql}) AS m
+          ON g.s_norm = m.__fm_s_norm
+          ORDER BY ${orderByClause}
+          LIMIT 50
+        `,
+        query_params: fmParams,
+        format: 'JSONEachRow',
+        clickhouse_settings: statsSettings,
+      })
+
+      const [summaryRes, routedRes, pairsRes] = await Promise.all([
+        summaryPromise,
+        routedPromise,
+        pairsPromise,
+      ])
+
+      const [summaryRow] = await summaryRes.json<Record<string, number | string>[]>()
+      const routedRowsList = routedRes
+        ? await routedRes.json<Record<string, number | string>[]>()
+        : []
+      const pairRows = await pairsRes.json<Array<{
+        source_value: string
+        master_value: string | null
+        score: number | string
+        row_count: number | string
+        match_status: string
+      }>>()
+
+      fuzzyMatch = {
+        uniqueSourceValues: countValue(summaryRow?.unique_source_values, 'jumlah nilai unik sumber'),
+        exactMatches: countValue(summaryRow?.exact_matches, 'jumlah cocok persis'),
+        fuzzyMatches: countValue(summaryRow?.fuzzy_matches, 'jumlah cocok mirip'),
+        ambiguousMatches: countValue(summaryRow?.ambiguous_matches, 'jumlah ambigu'),
+        unmatchedValues: countValue(summaryRow?.unmatched_values, 'jumlah tidak cocok'),
+        routedRows: parsed.routeUnmatched ? countValue(routedRowsList[0]?.routed_rows, 'jumlah baris dipindahkan') : 0,
+        pairOrder,
+        pairs: pairRows.map((item) => {
+          const status = item.match_status === 'exact' || item.match_status === 'fuzzy' || item.match_status === 'ambiguous'
+            ? item.match_status
+            : 'unmatched'
+          return {
+            sourceValue: String(item.source_value ?? ''),
+            masterValue: item.master_value === null || item.master_value === undefined ? null : String(item.master_value),
+            score: Number(item.score ?? 0),
+            rowCount: countValue(item.row_count, 'jumlah baris pasangan'),
+            status,
+          }
+        }),
       }
     }
 
@@ -201,6 +391,7 @@ FROM (
       totalRows: rowsOut,
       stats,
       ...(deduplicateStats ?? {}),
+      ...(fuzzyMatch ? { fuzzyMatch } : {}),
     }
   } catch (error) {
     if (error && typeof error === 'object' && 'statusCode' in error) throw error

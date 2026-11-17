@@ -286,6 +286,14 @@
               {{ numberFormat(statistics.discardedRows) }} baris dibuang ·
               {{ numberFormat(statistics.conflictGroups) }} grup memiliki isi yang berbeda.
             </p>
+            <p v-if="statistics.fuzzyMatch" class="wb-fuzzy-summary">
+              {{ numberFormat(statistics.fuzzyMatch.uniqueSourceValues) }} nilai unik sumber ·
+              {{ numberFormat(statistics.fuzzyMatch.exactMatches) }} cocok persis ·
+              {{ numberFormat(statistics.fuzzyMatch.fuzzyMatches) }} cocok mirip ·
+              {{ numberFormat(statistics.fuzzyMatch.ambiguousMatches) }} ambigu ·
+              {{ numberFormat(statistics.fuzzyMatch.unmatchedValues) }} tidak cocok ·
+              {{ numberFormat(statistics.fuzzyMatch.routedRows) }} baris dipindahkan.
+            </p>
             <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
               <strong>{{ columnName }}</strong>
               <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
@@ -293,6 +301,66 @@
               <span>NULL/kosong sesudah: {{ numberFormat(columnStats.afterNullOrEmpty) }}</span>
             </div>
             <p v-if="Object.keys(statistics.stats).length === 0">Tidak ada kolom yang berubah untuk diringkas.</p>
+
+            <div v-if="statistics.fuzzyMatch" class="wb-fuzzy-review">
+              <div class="wb-fuzzy-review-header">
+                <div>
+                  <h4>Tinjau pasangan</h4>
+                  <p>Daftar hingga 50 contoh pasangan nilai unik untuk meninjau kecocokan borderline.</p>
+                </div>
+                <div class="wb-fuzzy-controls">
+                  <label>
+                    <span>Urutan</span>
+                    <select v-model="pairOrder" :disabled="statisticsPending" @change="loadStatistics">
+                      <option value="lowest_score">Skor terendah dulu</option>
+                      <option value="highest_score">Skor tertinggi dulu</option>
+                      <option value="most_rows">Baris terbanyak dulu</option>
+                    </select>
+                  </label>
+                  <form
+                    v-if="selectedFuzzyStep && (selectedFuzzyStep.params?.mode ?? 'similarity') === 'similarity'"
+                    class="wb-fuzzy-threshold-form"
+                    @submit.prevent="applyFuzzyThreshold"
+                  >
+                    <label>
+                      <span>Ambang</span>
+                      <input v-model.number="thresholdDraft" type="number" min="0.5" max="1" step="0.01" required />
+                    </label>
+                    <button class="wb-button wb-small wb-primary" type="submit" :disabled="statisticsPending">
+                      Terapkan ambang
+                    </button>
+                  </form>
+                </div>
+              </div>
+              <p v-if="statistics.fuzzyMatch.pairs.length === 0" class="wb-message">
+                Tidak ada nilai unik sumber non-kosong untuk ditinjau.
+              </p>
+              <div v-else class="wb-fuzzy-table-wrap">
+                <table class="wb-fuzzy-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Nilai sumber</th>
+                      <th scope="col">Nilai master terpilih</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Skor</th>
+                      <th scope="col">Baris</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(pair, pairIdx) in statistics.fuzzyMatch.pairs" :key="`${pair.sourceValue}-${pairIdx}`">
+                      <td>{{ pair.sourceValue }}</td>
+                      <td>
+                        <span v-if="pair.masterValue !== null">{{ pair.masterValue }}</span>
+                        <span v-else class="wb-cell-null">—</span>
+                      </td>
+                      <td>{{ fuzzyStatusLabel(pair.status) }}</td>
+                      <td>{{ scoreFormat(pair.score) }}</td>
+                      <td>{{ numberFormat(pair.rowCount) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </template>
           <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
         </section>
@@ -721,6 +789,24 @@ type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; mes
 type PreviewRow = Record<string, unknown>
 type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number; warnings?: string[] }
 type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string; warnings?: string[] }> }
+type FuzzyPairOrder = 'lowest_score' | 'highest_score' | 'most_rows'
+type FuzzyPairItem = {
+  sourceValue: string
+  masterValue: string | null
+  score: number
+  rowCount: number
+  status: 'exact' | 'fuzzy' | 'ambiguous' | 'unmatched'
+}
+type FuzzyMatchStatistics = {
+  uniqueSourceValues: number
+  exactMatches: number
+  fuzzyMatches: number
+  ambiguousMatches: number
+  unmatchedValues: number
+  routedRows: number
+  pairOrder: FuzzyPairOrder
+  pairs: FuzzyPairItem[]
+}
 type StatisticsResponse = {
   scope: 'step' | 'pipeline'
   step?: number
@@ -736,6 +822,7 @@ type StatisticsResponse = {
   duplicateGroups?: number
   discardedRows?: number
   conflictGroups?: number
+  fuzzyMatch?: FuzzyMatchStatistics
   [key: string]: unknown
 }
 type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[]; warnings?: string[] }
@@ -808,6 +895,9 @@ const previewWarnings = ref<string[]>([])
 const totalRows = ref(0)
 const statistics = ref<StatisticsResponse | null>(null)
 const statisticsError = ref('')
+const statisticsPending = ref(false)
+const pairOrder = ref<FuzzyPairOrder>('lowest_score')
+const thresholdDraft = ref(0.9)
 const pipelineStatistics = ref<StatisticsResponse | null>(null)
 const pipelineStatisticsError = ref('')
 const pipelineStatisticsPending = ref(false)
@@ -868,6 +958,11 @@ let returnFocusElement: HTMLElement | null = null
 
 const sourceReady = computed(() => Boolean(pipeline.value.source.database && pipeline.value.source.table))
 const selectedOperation = computed(() => operations.value.find(({ id }) => id === selectedOperationId.value) ?? null)
+const selectedFuzzyStep = computed(() => {
+  if (selectedStep.value < 1) return null
+  const step = pipeline.value.steps[selectedStep.value - 1]
+  return step?.op === 'fuzzy_match_master' ? step : null
+})
 const visibleColumns = computed(() => {
   const schema = selectedStep.value === 0
     ? sourceColumns.value
@@ -970,6 +1065,16 @@ const missingColumnReferences = computed(() => {
     } else if (step.op === 'fill_from_master') {
       checkCol(p.sourceColumn, stepNumber)
       checkCol(p.targetColumn, stepNumber)
+    } else if (step.op === 'fuzzy_match_master') {
+      checkCol(p.sourceColumn, stepNumber)
+      if (p.routeUnmatched === true) checkCol(p.unmatchedColumn, stepNumber)
+      if (p.createTarget === true) {
+        if (typeof p.newTargetName === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(p.newTargetName.trim())) {
+          known.add(p.newTargetName.trim())
+        }
+      } else if (typeof p.targetColumn === 'string' && p.targetColumn.trim()) {
+        checkCol(p.targetColumn, stepNumber)
+      }
     }
   })
 
@@ -1027,6 +1132,20 @@ function touchedColumns(step: WorkbenchStep): string[] {
     return typeof step.params.targetColumn === 'string' && step.params.targetColumn
       ? [step.params.targetColumn]
       : []
+  }
+  if (step.op === 'fuzzy_match_master') {
+    const cols: string[] = []
+    if (step.params.createTarget === true) {
+      if (typeof step.params.newTargetName === 'string' && step.params.newTargetName) cols.push(step.params.newTargetName)
+    } else if (typeof step.params.targetColumn === 'string' && step.params.targetColumn) {
+      cols.push(step.params.targetColumn)
+    } else if (typeof step.params.sourceColumn === 'string' && step.params.sourceColumn) {
+      cols.push(step.params.sourceColumn)
+    }
+    if (step.params.routeUnmatched === true && typeof step.params.unmatchedColumn === 'string' && step.params.unmatchedColumn) {
+      cols.push(step.params.unmatchedColumn)
+    }
+    return [...new Set(cols)]
   }
   const values = Object.entries(step.params)
     .filter(([key, value]) => /column/i.test(key) && typeof value === 'string' && value)
@@ -1351,10 +1470,37 @@ async function loadPreview(): Promise<void> {
   }
 }
 
+function fuzzyStatusLabel(status: FuzzyPairItem['status']): string {
+  if (status === 'exact') return 'Cocok persis'
+  if (status === 'fuzzy') return 'Cocok mirip'
+  if (status === 'ambiguous') return 'Ambigu'
+  return 'Tidak cocok'
+}
+
+function scoreFormat(score: number): string {
+  return Number(score ?? 0).toLocaleString('id-ID', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })
+}
+
+async function applyFuzzyThreshold(): Promise<void> {
+  if (!selectedFuzzyStep.value || selectedStep.value < 1) return
+  const clamped = Math.min(1, Math.max(0.5, Number(thresholdDraft.value) || 0.9))
+  const rounded = Math.round(clamped * 100) / 100
+  thresholdDraft.value = rounded
+  selectedFuzzyStep.value.params = {
+    ...selectedFuzzyStep.value.params,
+    threshold: rounded,
+  }
+  workbench.savePipeline()
+  await loadStatistics()
+}
+
 async function loadStatistics(): Promise<void> {
   if (selectedStep.value < 1) return
   const request = ++statisticsRequest
-  statistics.value = null
+  statisticsPending.value = true
   statisticsError.value = ''
   try {
     const response = await $fetch<StatisticsResponse>('/api/workbench/stats', {
@@ -1364,11 +1510,17 @@ async function loadStatistics(): Promise<void> {
         steps: pipeline.value.steps.slice(0, selectedStep.value),
         step: selectedStep.value,
         scope: 'step',
+        pairOrder: pairOrder.value,
       },
     })
     if (request === statisticsRequest) statistics.value = response
   } catch (error) {
-    if (request === statisticsRequest) statisticsError.value = getErrorMessage(error, 'Statistik tidak dapat dihitung.')
+    if (request === statisticsRequest) {
+      statistics.value = null
+      statisticsError.value = getErrorMessage(error, 'Statistik tidak dapat dihitung.')
+    }
+  } finally {
+    if (request === statisticsRequest) statisticsPending.value = false
   }
 }
 
@@ -1420,7 +1572,7 @@ function operationMatchesColumn(operation: Operation, column: Column): boolean {
     const textOnly = `${parameter.label} ${parameter.description}`.toLowerCase().includes('teks')
       || operation.id === 'trim_text'
       || operation.id === 'replace_values'
-      || (operation.id === 'fill_from_master' && /Column$/.test(parameter.key))
+      || ((operation.id === 'fill_from_master' || operation.id === 'fuzzy_match_master') && /Column$/.test(parameter.key) && parameter.key !== 'masterColumn')
     return !textOnly || isTextColumn(column)
   })
 }
@@ -1775,6 +1927,12 @@ function applyColumnMapping(): void {
     } else if (step.op === 'fill_from_master') {
       p.sourceColumn = remap(p.sourceColumn)
       p.targetColumn = remap(p.targetColumn)
+    } else if (step.op === 'fuzzy_match_master') {
+      p.sourceColumn = remap(p.sourceColumn)
+      if (p.createTarget !== true && typeof p.targetColumn === 'string' && p.targetColumn) {
+        p.targetColumn = remap(p.targetColumn)
+      }
+      if (p.routeUnmatched === true) p.unmatchedColumn = remap(p.unmatchedColumn)
     }
     return { ...step, params: p }
   })
@@ -1883,6 +2041,15 @@ watch(selectedStep, () => {
   rareResult.value = null
   selectedRareKeys.value = []
 })
+
+watch(
+  () => selectedFuzzyStep.value?.params?.threshold,
+  (val) => {
+    const parsed = Number(val)
+    thresholdDraft.value = Number.isFinite(parsed) && parsed >= 0.5 && parsed <= 1 ? parsed : 0.9
+  },
+  { immediate: true },
+)
 
 watch(
   () => pipeline.value.source.database,
@@ -2960,6 +3127,106 @@ onMounted(async () => {
   background: #fff;
   font: inherit;
   font-size: 13px;
+}
+
+.wb-fuzzy-summary {
+  color: #263a4e;
+  font-weight: 500;
+}
+
+.wb-fuzzy-review {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #e3ebf2;
+}
+
+.wb-fuzzy-review-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wb-fuzzy-review-header h4 {
+  margin: 0;
+  color: #263a4e;
+  font-size: 13px;
+}
+
+.wb-fuzzy-review-header p {
+  margin: 2px 0 0;
+  color: var(--warna-redup);
+  font-size: 12px;
+}
+
+.wb-fuzzy-controls,
+.wb-fuzzy-threshold-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wb-fuzzy-controls label,
+.wb-fuzzy-threshold-form label {
+  display: grid;
+  gap: 3px;
+  color: #40566d;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-fuzzy-controls select,
+.wb-fuzzy-threshold-form input {
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.wb-fuzzy-threshold-form input {
+  width: 84px;
+}
+
+.wb-fuzzy-table-wrap {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.wb-fuzzy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.wb-fuzzy-table th,
+.wb-fuzzy-table td {
+  padding: 7px 9px;
+  border-bottom: 1px solid #e8eff5;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wb-fuzzy-table th {
+  position: sticky;
+  top: 0;
+  color: #526479;
+  background: #f5f8fa;
+  font-weight: 650;
+}
+
+.wb-fuzzy-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 @media (max-width: 620px) {

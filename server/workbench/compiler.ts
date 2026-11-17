@@ -20,7 +20,7 @@ async function resolveSchema(
     query: `SELECT * FROM (${sql}) LIMIT 0`,
     query_params: params,
     format: 'JSON',
-    clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+    clickhouse_settings: { readonly: 1, max_execution_time: 60 },
   })
   const json = await result.json<{ meta?: Array<{ name: string; type: string }> }>()
   const meta = json.meta ?? []
@@ -99,6 +99,8 @@ export async function compilePipeline(
         schema,
         params: step.params ?? {},
         metadata,
+        inputSql: currentSql,
+        inputParams: { ...boundParams },
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)
