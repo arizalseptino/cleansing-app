@@ -175,12 +175,15 @@ export default defineEventHandler(async (event) => {
     }
 
     currentStage = 'verifikasi_baris'
+    const integrityExpr = quotedColumns
+      .map((colSql) => `length(ifNull(${colSql}, ''))`)
+      .join(' + ')
     const countResult = await client.query({
-      query: `SELECT count() AS total FROM ${quotedDb}.${quotedStagingTable}`,
+      query: `SELECT count() AS total, sum(${integrityExpr}) AS checked_bytes FROM ${quotedDb}.${quotedStagingTable}`,
       format: 'JSONEachRow',
-      clickhouse_settings: { readonly: 1, max_execution_time: 60 },
+      clickhouse_settings: { readonly: 1, max_execution_time: 120 },
     })
-    const countRows = await countResult.json<{ total: number | string }[]>()
+    const countRows = await countResult.json<{ total: number | string; checked_bytes?: number | string }[]>()
     const actualCount = Number(countRows[0]?.total)
 
     if (!Number.isSafeInteger(actualCount) || actualCount !== expectedRowCount) {
