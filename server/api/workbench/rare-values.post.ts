@@ -31,7 +31,7 @@ export default defineEventHandler(async (event) => {
 
   const column = typeof record.column === 'string' ? record.column : ''
   if (!column.trim()) {
-    badRequest(400, 'Kolom wajib dipilih', 'Pilih kolom teks untuk menganalisis nilai langka.')
+    badRequest(400, 'Kolom wajib dipilih', 'Pilih kolom teks untuk mengecek nilai frekuensi rendah.')
   }
 
   const threshold = record.threshold === undefined ? 10 : Number(record.threshold)
@@ -41,7 +41,7 @@ export default defineEventHandler(async (event) => {
 
   const limit = record.limit === undefined ? 100 : Number(record.limit)
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
-    badRequest(400, 'Batas daftar tidak valid', 'Batas daftar nilai langka harus berupa bilangan bulat antara 1 dan 200.')
+    badRequest(400, 'Batas daftar tidak valid', 'Batas daftar nilai frekuensi rendah harus berupa bilangan bulat antara 1 dan 200.')
   }
 
   const search = record.search === undefined ? '' : record.search
@@ -166,8 +166,8 @@ export default defineEventHandler(async (event) => {
     if (error && typeof error === 'object' && 'statusCode' in error) throw error
     throw createError({
       statusCode: 500,
-      statusMessage: 'Gagal menganalisis nilai langka',
-      message: 'Analisis nilai langka tidak dapat dihitung melalui ClickHouse.',
+      statusMessage: 'Gagal menganalisis nilai frekuensi rendah',
+      message: 'Analisis nilai frekuensi rendah tidak dapat dihitung melalui ClickHouse.',
     })
   }
 })

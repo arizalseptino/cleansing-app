@@ -365,15 +365,15 @@
           <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
         </section>
 
-        <section class="wb-rare-panel" aria-label="Nilai langka">
+        <section class="wb-rare-panel" aria-label="Cek Sisa Anomali / Typo (Frekuensi Rendah)">
           <div class="wb-rare-heading">
             <div>
-              <h3>Nilai langka (long-tail)</h3>
-              <p>Analisis nilai teks yang jarang muncul setelah langkah ke-{{ selectedStep }}. Klik nilai untuk menyaring tampilan pratinjau.</p>
+              <h3>Cek Sisa Anomali / Typo (Frekuensi Rendah)</h3>
+              <p>Periksa sisa nilai teks berfrekuensi rendah yang berpotensi anomali atau typo setelah langkah ke-{{ selectedStep }}. Klik nilai untuk menyaring tampilan pratinjau.</p>
             </div>
           </div>
 
-          <p v-if="!sourceReady" class="wb-message">Pilih database dan tabel sumber untuk menganalisis nilai langka.</p>
+          <p v-if="!sourceReady" class="wb-message">Pilih database dan tabel sumber untuk mengecek sisa anomali atau typo (frekuensi rendah).</p>
           <p v-else-if="rareTextColumns.length === 0" class="wb-message">Tidak ada kolom bertipe teks pada langkah ini.</p>
           <template v-else>
             <form class="wb-rare-controls" @submit.prevent="loadRareValues">
@@ -409,7 +409,7 @@
                 </label>
               </div>
               <button class="wb-button wb-small wb-primary" type="submit" :disabled="!rareColumn || rarePending">
-                {{ rarePending ? 'Menganalisis...' : 'Cari nilai langka' }}
+                {{ rarePending ? 'Menganalisis...' : 'Cek Anomali / Typo' }}
               </button>
             </form>
 
@@ -417,7 +417,7 @@
             <template v-else-if="rareResult">
               <p class="wb-rare-summary" role="status">
                 <strong>{{ numberFormat(rareResult.summary.uniqueValues) }}</strong> nilai unik ·
-                <strong>{{ numberFormat(rareResult.summary.rareValues) }}</strong> nilai langka (&lt; {{ rareResult.threshold }}) ·
+                <strong>{{ numberFormat(rareResult.summary.rareValues) }}</strong> nilai frekuensi rendah (&lt; {{ rareResult.threshold }}) ·
                 <strong>{{ numberFormat(rareResult.summary.affectedRows) }}</strong> baris terdampak
               </p>
 
@@ -434,7 +434,7 @@
               </div>
 
               <p v-if="rareResult.items.length === 0" class="wb-message">
-                Tidak ada nilai langka dengan kemunculan kurang dari {{ rareResult.threshold }}.
+                Tidak ditemukan sisa anomali atau typo dengan kemunculan kurang dari {{ rareResult.threshold }}.
               </p>
               <ul v-else class="wb-rare-list">
                 <li
@@ -1621,6 +1621,19 @@ function isTextColumn(column: Column): boolean {
   return /^\s*String\s*\)*\s*$/.test(type)
 }
 
+function isIdColumn(column: Column): boolean {
+  const trimmed = column.name.trim()
+  const lower = trimmed.toLowerCase()
+  if (lower === 'id' || lower === 'uuid') return true
+  if (lower.endsWith('_id') || lower.startsWith('id_')) return true
+  if (/[a-z0-9]Id$/.test(trimmed) || /^id[A-Z]/.test(trimmed)) return true
+  return false
+}
+
+function pickDefaultRareColumn(cols: Column[]): string {
+  return cols.find((col) => !isIdColumn(col))?.name ?? cols[0]?.name ?? ''
+}
+
 function openSaveDialog(): void {
   const sourceName = pipeline.value.source.table
   resultTableName.value = `${sourceName}_cleaned`.slice(0, 64)
@@ -1771,7 +1784,7 @@ async function loadRareValues(): Promise<void> {
     })
   } catch (error) {
     rareResult.value = null
-    rareError.value = getErrorMessage(error, 'Nilai langka tidak dapat dianalisis.')
+    rareError.value = getErrorMessage(error, 'Nilai frekuensi rendah tidak dapat dianalisis.')
   } finally {
     rarePending.value = false
   }
@@ -2043,11 +2056,11 @@ watch([resultEngine, orderBy, saveOriginal], ([engine, nextOrderBy, nextSaveOrig
 
 watch(rareTextColumns, (cols) => {
   if (!cols.some((c) => c.name === rareColumn.value)) {
-    rareColumn.value = cols[0]?.name ?? ''
+    rareColumn.value = pickDefaultRareColumn(cols)
     rareResult.value = null
     selectedRareKeys.value = []
   }
-})
+}, { immediate: true })
 
 watch(visibleColumns, (cols) => {
   if (displayFilter.value && !cols.some((c) => c.name === displayFilter.value?.column)) {
