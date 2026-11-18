@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { recordCleansingHistory } from '../../features/cleansing-history'
 import {
   cleanupTempFile,
@@ -60,9 +61,11 @@ export default defineEventHandler(async (event) => {
   let targetColumns: string[] = []
   let expectedRowCount = 0
   let verifiedRowCount = 0
-  let createdNewTable = false
+  let createdStagingTable = false
+  let renamedToFinalTable = false
   let quotedDb = ''
   let quotedTable = ''
+  let quotedStagingTable = ''
   let currentStage = 'membaca_permintaan'
   let batchIndex = 0
 
@@ -101,19 +104,21 @@ export default defineEventHandler(async (event) => {
       inspection.columnCount,
     )
 
+    const stagingTableName = `__tmp_ingest_${randomUUID().replace(/-/g, '').slice(0, 12)}`
     quotedDb = quoteIdentifier(targetDatabase)
     quotedTable = quoteIdentifier(tableName)
+    quotedStagingTable = quoteIdentifier(stagingTableName)
     const quotedColumns = targetColumns.map(quoteIdentifier)
     const columnDefinitions = quotedColumns
       .map((colSql) => `${colSql} Nullable(String)`)
       .join(', ')
 
-    currentStage = 'buat_tabel'
+    currentStage = 'buat_tabel_sementara'
     await client.command({
-      query: `CREATE TABLE ${quotedDb}.${quotedTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
+      query: `CREATE TABLE ${quotedDb}.${quotedStagingTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
       clickhouse_settings: { max_execution_time: 60 },
     })
-    createdNewTable = true
+    createdStagingTable = true
 
     const csvInsertSettings = {
       format_csv_delimiter: delimiter,
@@ -143,14 +148,14 @@ export default defineEventHandler(async (event) => {
           clickhouseUrl: config.clickhouseUrl,
           clickhouseUser: config.clickhouseUser,
           clickhousePassword: config.clickhousePassword,
-          table: `${quotedDb}.${quotedTable}`,
+          table: `${quotedDb}.${quotedStagingTable}`,
           columns: quotedColumns,
           batchBuffer: batchBuf,
           clickhouseSettings: csvInsertSettings,
         })
       } else {
         await client.insert({
-          table: `${quotedDb}.${quotedTable}`,
+          table: `${quotedDb}.${quotedStagingTable}`,
           columns: quotedColumns,
           values: createChunkedReadable(batchBuf),
           format: 'CSV',
@@ -169,7 +174,7 @@ export default defineEventHandler(async (event) => {
 
     currentStage = 'verifikasi_baris'
     const countResult = await client.query({
-      query: `SELECT count() AS total FROM ${quotedDb}.${quotedTable}`,
+      query: `SELECT count() AS total FROM ${quotedDb}.${quotedStagingTable}`,
       format: 'JSONEachRow',
       clickhouse_settings: { readonly: 1, max_execution_time: 60 },
     })
@@ -183,6 +188,14 @@ export default defineEventHandler(async (event) => {
         message: `Jumlah baris pada tabel baru (${actualCount.toLocaleString('id-ID')}) tidak sama dengan data sumber (${expectedRowCount.toLocaleString('id-ID')}).`,
       })
     }
+
+    currentStage = 'finalisasi_tabel'
+    await ensureTableDoesNotExist(client, targetDatabase, tableName)
+    await client.command({
+      query: `RENAME TABLE ${quotedDb}.${quotedStagingTable} TO ${quotedDb}.${quotedTable}`,
+      clickhouse_settings: { max_execution_time: 60 },
+    })
+    renamedToFinalTable = true
 
     verifiedRowCount = actualCount
     status = 'sukses'
@@ -235,14 +248,14 @@ export default defineEventHandler(async (event) => {
       livenessNote = health.note
     }
 
-    if (createdNewTable && quotedDb && quotedTable) {
+    if (createdStagingTable && !renamedToFinalTable && quotedDb && quotedStagingTable) {
       try {
         await client.command({
-          query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedTable}`,
+          query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedStagingTable}`,
           clickhouse_settings: { max_execution_time: 30 },
         })
       } catch (dropErr) {
-        console.warn('Gagal membersihkan tabel baru setelah pemuatan batal.', dropErr)
+        console.warn('Gagal membersihkan tabel sementara setelah pemuatan batal.', dropErr)
       }
     }
 

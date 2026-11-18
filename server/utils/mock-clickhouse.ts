@@ -2010,6 +2010,38 @@ export class MockClickHouseClient {
       return
     }
 
+    if (/^RENAME\s+TABLE/i.test(trimmed)) {
+      const tokens = tokenize(trimmed)
+      // Expected: RENAME TABLE db1 . tbl1 TO db2 . tbl2
+      let i = 2
+      const srcDbTok = tokens[i]
+      const srcTblTok = tokens[i + 2]
+      i += 3
+      if (tokens[i]?.type === 'ident' && tokens[i].value.toUpperCase() === 'TO') {
+        i += 1
+      }
+      const dstDbTok = tokens[i]
+      const dstTblTok = tokens[i + 2]
+      const srcDatabase = srcDbTok?.type === 'ident' ? srcDbTok.value : 'default'
+      const srcTable = srcTblTok?.type === 'ident' ? srcTblTok.value : ''
+      const dstDatabase = dstDbTok?.type === 'ident' ? dstDbTok.value : 'default'
+      const dstTable = dstTblTok?.type === 'ident' ? dstTblTok.value : ''
+
+      const srcDb = this.databases.get(srcDatabase)
+      const tbl = srcDb?.get(srcTable)
+      if (!tbl) {
+        throw new Error(`Table ${srcDatabase}.${srcTable} does not exist`)
+      }
+      if (!this.databases.has(dstDatabase)) this.databases.set(dstDatabase, new Map())
+      const dstDb = this.databases.get(dstDatabase)!
+      if (dstDb.has(dstTable)) {
+        throw new Error(`Table ${dstDatabase}.${dstTable} already exists`)
+      }
+      srcDb!.delete(srcTable)
+      dstDb.set(dstTable, { ...tbl, name: dstTable })
+      return
+    }
+
     if (/^DROP\s+TABLE/i.test(trimmed)) {
       const tokens = tokenize(trimmed)
       let i = 2
