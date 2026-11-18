@@ -83,27 +83,112 @@
         </label>
       </fieldset>
 
-      <div v-else-if="parameter.type === 'pairs'" class="pair-list">
-        <div v-for="(pair, index) in pairValues(parameter.key)" :key="index" class="pair-row">
-          <label class="sr-only" :for="`pair-old-${parameter.key}-${index}`">Nilai lama</label>
-          <input
-            :id="`pair-old-${parameter.key}-${index}`"
-            v-model="pair.old"
-            type="text"
-            placeholder="Nilai lama"
-          />
-          <label class="sr-only" :for="`pair-new-${parameter.key}-${index}`">Nilai baru</label>
-          <input
-            :id="`pair-new-${parameter.key}-${index}`"
-            v-model="pair.new"
-            type="text"
-            placeholder="Nilai baru"
-          />
-          <button type="button" class="quiet-button" :aria-label="`Hapus pasangan ${index + 1}`" @click="removePair(parameter.key, index)">
-            Hapus
+      <div v-else-if="parameter.type === 'pairs'" class="pair-container">
+        <div class="pair-mode-header">
+          <div class="pair-mode-toggle" role="tablist" aria-label="Mode input pasangan nilai">
+            <button
+              type="button"
+              role="tab"
+              class="pair-mode-btn"
+              :class="{ 'pair-mode-btn--active': getPairMode(parameter.key) === 'list' }"
+              :aria-selected="getPairMode(parameter.key) === 'list'"
+              @click="switchPairMode(parameter.key, 'list')"
+            >
+              Daftar baris
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="pair-mode-btn"
+              :class="{ 'pair-mode-btn--active': getPairMode(parameter.key) === 'bulk' }"
+              :aria-selected="getPairMode(parameter.key) === 'bulk'"
+              @click="switchPairMode(parameter.key, 'bulk')"
+            >
+              Tempel teks (Bulk)
+            </button>
+          </div>
+          <span v-if="activePairCount(parameter.key) > 0" class="pair-count-pill">
+            {{ activePairCount(parameter.key) }} pasangan
+          </span>
+        </div>
+
+        <!-- Mode Daftar Baris -->
+        <div v-show="getPairMode(parameter.key) === 'list'" class="pair-list">
+          <div v-for="(pair, index) in pairValues(parameter.key)" :key="index" class="pair-row">
+            <label class="sr-only" :for="`pair-old-${parameter.key}-${index}`">Nilai lama</label>
+            <input
+              :id="`pair-old-${parameter.key}-${index}`"
+              v-model="pair.old"
+              type="text"
+              placeholder="Nilai lama"
+              maxlength="200"
+              @input="markListDirty(parameter.key)"
+            />
+            <label class="sr-only" :for="`pair-new-${parameter.key}-${index}`">Nilai baru</label>
+            <input
+              :id="`pair-new-${parameter.key}-${index}`"
+              v-model="pair.new"
+              type="text"
+              placeholder="Nilai baru (kosong = NULL / '')"
+              maxlength="200"
+              @input="markListDirty(parameter.key)"
+            />
+            <button type="button" class="quiet-button" :aria-label="`Hapus pasangan ${index + 1}`" @click="removePair(parameter.key, index)">
+              Hapus
+            </button>
+          </div>
+          <button type="button" class="quiet-button" :disabled="pairValues(parameter.key).length >= 500" @click="addPair(parameter.key)">
+            Tambah pasangan
           </button>
         </div>
-        <button type="button" class="quiet-button" @click="addPair(parameter.key)">Tambah pasangan</button>
+
+        <!-- Mode Tempel Teks (Bulk) -->
+        <div v-show="getPairMode(parameter.key) === 'bulk'" class="bulk-pair-wrapper">
+          <p class="bulk-instructions">
+            Format per baris: <code>NILAI_LAMA = NILAI_BARU</code>.<br />
+            Pemisah yang didukung: <code>=</code>, <code>-&gt;</code>, <code>=&gt;</code>, atau <strong>Tab</strong> (bisa langsung copy-paste 2 kolom dari Excel / Google Sheets). Bagian setelah pemisah yang kosong akan dianggap string kosong / NULL.
+          </p>
+          <textarea
+            :id="`workbench-${parameter.key}-bulk`"
+            :value="bulkTexts[parameter.key] ?? ''"
+            class="bulk-textarea"
+            rows="8"
+            spellcheck="false"
+            :placeholder="bulkPlaceholder"
+            @input="handleBulkInput(parameter.key, ($event.target as HTMLTextAreaElement).value)"
+          ></textarea>
+
+          <div class="bulk-feedback">
+            <div v-if="bulkPairCounts[parameter.key] > 0" class="bulk-badge-success">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+              </svg>
+              <span>{{ bulkPairCounts[parameter.key] }} pasangan nilai siap diterapkan</span>
+            </div>
+            <div v-else-if="!bulkTexts[parameter.key]?.trim()" class="bulk-badge-empty">
+              <span>Tempel teks atau ketik aturan di atas untuk memulai</span>
+            </div>
+            <div v-else class="bulk-badge-empty">
+              <span>0 pasangan nilai terbaca</span>
+            </div>
+
+            <div v-if="bulkErrors[parameter.key]?.length" class="bulk-error-box" role="alert">
+              <strong>Peringatan format ({{ bulkErrors[parameter.key].length }} baris tidak valid):</strong>
+              <ul>
+                <li v-for="(err, errIdx) in bulkErrors[parameter.key].slice(0, 5)" :key="errIdx">{{ err }}</li>
+                <li v-if="bulkErrors[parameter.key].length > 5">
+                  ...dan {{ bulkErrors[parameter.key].length - 5 }} baris lainnya
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="bulkWarnings[parameter.key]?.length" class="bulk-warning-box" role="alert">
+              <ul>
+                <li v-for="(warn, warnIdx) in bulkWarnings[parameter.key]" :key="warnIdx">{{ warn }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div v-else-if="parameter.type === 'string-list'" class="pair-list">
@@ -320,6 +405,122 @@ const emit = defineEmits<{
 
 const draft = reactive<Record<string, unknown>>({})
 const formError = ref('')
+
+const pairModes = reactive<Record<string, 'list' | 'bulk'>>({})
+const bulkTexts = reactive<Record<string, string>>({})
+const bulkErrors = reactive<Record<string, string[]>>({})
+const bulkWarnings = reactive<Record<string, string[]>>({})
+const bulkPairCounts = reactive<Record<string, number>>({})
+const listDirty = reactive<Record<string, boolean>>({})
+
+const bulkPlaceholder = `KEMENDAGRI = KEMENTERIAN DALAM NEGERI\nKEMENKES = KEMENTERIAN KESEHATAN\n- =\n0 =`
+
+function getPairMode(key: string): 'list' | 'bulk' {
+  return pairModes[key] ?? 'list'
+}
+
+function activePairCount(key: string): number {
+  if (getPairMode(key) === 'bulk') return bulkPairCounts[key] ?? 0
+  return pairValues(key).filter((p) => p.old.trim() !== '' || p.new.trim() !== '').length
+}
+
+function markListDirty(key: string): void {
+  listDirty[key] = true
+}
+
+function formatPairsToBulkText(pairs: Pair[]): string {
+  if (!pairs || pairs.length === 0) return ''
+  return pairs
+    .filter((p) => p.old.trim() !== '' || p.new.trim() !== '')
+    .map((p) => (p.new.trim() === '' ? `${p.old} =` : `${p.old} = ${p.new}`))
+    .join('\n')
+}
+
+function findFirstSeparator(line: string): { index: number; length: number; sep: string } | null {
+  const separators = ['\t', '=>', '->', '=']
+  let earliestIndex = -1
+  let matchedSep = ''
+  for (const sep of separators) {
+    const idx = line.indexOf(sep)
+    if (idx !== -1) {
+      if (earliestIndex === -1 || idx < earliestIndex) {
+        earliestIndex = idx
+        matchedSep = sep
+      } else if (idx === earliestIndex && sep.length > matchedSep.length) {
+        matchedSep = sep
+      }
+    }
+  }
+  if (earliestIndex === -1) return null
+  return { index: earliestIndex, length: matchedSep.length, sep: matchedSep }
+}
+
+function parseBulkText(key: string, text: string, updateDraft: boolean): void {
+  const lines = text.split(/\r?\n/)
+  const validPairs: Pair[] = []
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]
+    if (rawLine.trim() === '') continue
+    const lineNum = i + 1
+
+    const sepMatch = findFirstSeparator(rawLine)
+    if (!sepMatch) {
+      const preview = rawLine.length > 30 ? `${rawLine.slice(0, 30)}...` : rawLine
+      errors.push(`Baris ${lineNum} ("${preview}"): format tidak valid (tidak ada pemisah '=', '->', '=>', atau Tab).`)
+      continue
+    }
+
+    const oldVal = rawLine.slice(0, sepMatch.index).trim()
+    const newVal = rawLine.slice(sepMatch.index + sepMatch.length).trim()
+
+    if (oldVal === '') {
+      errors.push(`Baris ${lineNum}: nilai lama sebelum pemisah tidak boleh kosong.`)
+      continue
+    }
+
+    if (oldVal.length > 200) {
+      warnings.push(`Baris ${lineNum}: nilai lama "${oldVal.slice(0, 20)}..." melebihi 200 karakter (${oldVal.length} karakter).`)
+    }
+    if (newVal.length > 200) {
+      warnings.push(`Baris ${lineNum}: nilai baru "${newVal.slice(0, 20)}..." melebihi 200 karakter (${newVal.length} karakter).`)
+    }
+
+    validPairs.push({ old: oldVal, new: newVal })
+  }
+
+  if (validPairs.length > 500) {
+    warnings.push(`Jumlah pasangan melebihi batas maksimal 500 (${validPairs.length} pasangan ditemukan). Hanya 500 pasangan pertama yang akan diproses.`)
+  }
+
+  bulkPairCounts[key] = validPairs.length
+  bulkErrors[key] = errors
+  bulkWarnings[key] = warnings
+
+  if (updateDraft) {
+    const capped = validPairs.slice(0, 500)
+    draft[key] = capped.length > 0 ? capped : [{ old: '', new: '' }]
+  }
+}
+
+function handleBulkInput(key: string, text: string): void {
+  bulkTexts[key] = text
+  parseBulkText(key, text, true)
+}
+
+function switchPairMode(key: string, mode: 'list' | 'bulk'): void {
+  if (mode === 'bulk') {
+    if (listDirty[key] || !bulkTexts[key]) {
+      const list = pairValues(key).filter((p) => p.old.trim() !== '' || p.new.trim() !== '')
+      bulkTexts[key] = formatPairsToBulkText(list)
+      parseBulkText(key, bulkTexts[key], false)
+      listDirty[key] = false
+    }
+  }
+  pairModes[key] = mode
+}
 const optionLabels: Record<string, string> = {
   trim: 'Rapikan spasi di tepi',
   collapse_spaces: 'Rapatkan spasi berulang',
@@ -409,12 +610,17 @@ watch(
           : [blankRule()]
       }
       else if (parameter.type === 'pairs') {
-        draft[parameter.key] = Array.isArray(value) && value.length
-          ? value.map((item) => ({
-              old: String((item as Pair)?.old ?? ''),
-              new: String((item as Pair)?.new ?? ''),
+        const rawList = Array.isArray(value) ? value : []
+        const normalized = rawList.length
+          ? rawList.map((item: any) => ({
+              old: String(item?.old ?? item?.oldValue ?? ''),
+              new: String(item?.new ?? item?.newValue ?? ''),
             }))
           : [{ old: '', new: '' }]
+        draft[parameter.key] = normalized
+        bulkTexts[parameter.key] = formatPairsToBulkText(normalized)
+        parseBulkText(parameter.key, bulkTexts[parameter.key], false)
+        listDirty[parameter.key] = false
       } else if (parameter.type === 'boolean') draft[parameter.key] = Boolean(value ?? parameter.defaultValue ?? false)
       else draft[parameter.key] = value ?? parameter.defaultValue ?? (parameter.type === 'number' ? '' : '')
     }
@@ -452,11 +658,15 @@ function pairValues(key: string): Pair[] {
 }
 
 function addPair(key: string): void {
+  if (pairValues(key).length >= 500) return
   draft[key] = [...pairValues(key), { old: '', new: '' }]
+  markListDirty(key)
 }
 
 function removePair(key: string, index: number): void {
-  draft[key] = pairValues(key).filter((_, itemIndex) => itemIndex !== index)
+  const next = pairValues(key).filter((_, itemIndex) => itemIndex !== index)
+  draft[key] = next.length > 0 ? next : [{ old: '', new: '' }]
+  markListDirty(key)
 }
 
 function stringListValues(key: string): string[] {
@@ -590,8 +800,32 @@ function submit(): void {
       return
     }
     if (parameter.type === 'number' && value !== '') params[parameter.key] = Number(value)
-    else if (parameter.type === 'pairs' && Array.isArray(value)) {
-      params[parameter.key] = value.filter((pair) => pair.old !== '' || pair.new !== '')
+    else if (parameter.type === 'pairs') {
+      const mode = getPairMode(parameter.key)
+      if (mode === 'bulk' && bulkErrors[parameter.key]?.length) {
+        formError.value = `Terdapat ${bulkErrors[parameter.key].length} baris tidak valid pada input Tempel teks. Silakan perbaiki atau hapus baris tersebut sebelum melanjutkan.`
+        return
+      }
+      const rawList = pairValues(parameter.key)
+      const filtered = rawList.filter((pair) => pair.old.trim() !== '' || pair.new.trim() !== '')
+      if (parameter.required && filtered.length === 0) {
+        formError.value = `${parameter.label} wajib diisi (minimal satu pasangan lama-baru).`
+        return
+      }
+      if (filtered.length > 500) {
+        formError.value = 'Maksimal 500 pasangan nilai per operasi.'
+        return
+      }
+      for (const [index, pair] of filtered.entries()) {
+        if (pair.old.length > 200 || pair.new.length > 200) {
+          formError.value = `Pasangan ke-${index + 1} terlalu panjang (maksimal 200 karakter).`
+          return
+        }
+      }
+      params[parameter.key] = filtered.map((pair) => ({
+        old: pair.old,
+        new: pair.new,
+      }))
     } else if (parameter.type === 'string-list' && Array.isArray(value)) params[parameter.key] = [...value]
     else if (parameter.type === 'rules' && Array.isArray(value)) params[parameter.key] = value
     else params[parameter.key] = value
@@ -665,6 +899,158 @@ function submit(): void {
   width: 16px;
   min-height: 16px;
   margin: 0;
+}
+
+.pair-container {
+  display: grid;
+  gap: 8px;
+}
+
+.pair-mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pair-mode-toggle {
+  display: inline-flex;
+  padding: 3px;
+  background: #edf3f8;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  gap: 3px;
+}
+
+.pair-mode-btn {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #526479;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pair-mode-btn:hover {
+  color: var(--warna-utama);
+}
+
+.pair-mode-btn--active {
+  background: #fff;
+  color: var(--warna-utama);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+}
+
+.pair-count-pill {
+  font-size: 11px;
+  font-weight: 650;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: var(--warna-biru-muda);
+  color: var(--warna-utama);
+}
+
+.bulk-pair-wrapper {
+  display: grid;
+  gap: 8px;
+}
+
+.bulk-instructions {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warna-redup);
+  line-height: 1.5;
+}
+
+.bulk-instructions code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #edf3f8;
+  color: #2c4257;
+  font-size: 11.5px;
+}
+
+.bulk-textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: 10px 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.bulk-textarea:focus {
+  outline: none;
+  border-color: var(--warna-utama);
+  box-shadow: 0 0 0 3px rgba(87, 152, 215, 0.15);
+}
+
+.bulk-feedback {
+  display: grid;
+  gap: 6px;
+}
+
+.bulk-badge-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1b6d34;
+  background: #edf8f0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #c2e9cb;
+  width: fit-content;
+}
+
+.bulk-badge-empty {
+  font-size: 12px;
+  color: var(--warna-redup);
+  padding: 2px 0;
+}
+
+.bulk-error-box {
+  padding: 8px 10px;
+  border: 1px solid #f8b4b4;
+  border-radius: 6px;
+  background: #fdf2f2;
+  color: #9b1c1c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bulk-error-box strong {
+  display: block;
+  font-weight: 650;
+}
+
+.bulk-error-box ul,
+.bulk-warning-box ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
+.bulk-warning-box {
+  padding: 8px 10px;
+  border: 1px solid #f6d289;
+  border-radius: 6px;
+  background: #fdf8e8;
+  color: #8f5c00;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .pair-list {
