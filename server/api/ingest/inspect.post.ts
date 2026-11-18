@@ -1,15 +1,36 @@
-import { inspectCsvPayload, isHttpError, readIngestPayload, sanitizeIngestErrorMessage } from '../../features/ingest-csv'
+import {
+  cleanupTempFile,
+  inspectCsvFile,
+  inspectCsvPayload,
+  isHttpError,
+  readIngestPayload,
+  registerStagedUpload,
+  sanitizeIngestErrorMessage,
+} from '../../features/ingest-csv'
 
 export default defineEventHandler(async (event) => {
+  let tempFileToCleanupOnError: string | null = null
+
   try {
     const payload = await readIngestPayload(event)
-    const inspection = inspectCsvPayload(
-      payload.textNoBom,
-      payload.delimiterOption,
-      payload.mode === 'file' ? payload.sourceLabel : undefined,
-    )
+    if (payload.mode === 'file' && payload.ownsTempFile) {
+      tempFileToCleanupOnError = payload.filePath
+    }
+
+    const inspection = payload.mode === 'file'
+      ? await inspectCsvFile(payload.filePath, payload.delimiterOption, payload.sourceLabel)
+      : inspectCsvPayload(payload.textNoBom, payload.delimiterOption)
+
+    let uploadId: string | null = null
+    if (payload.mode === 'file') {
+      uploadId = payload.ownsTempFile
+        ? registerStagedUpload(payload.filePath, payload.sourceLabel)
+        : payload.stagedUploadId
+      tempFileToCleanupOnError = null
+    }
 
     return {
+      uploadId,
       mode: payload.mode,
       sourceLabel: payload.sourceLabel,
       delimiter: inspection.delimiter,
@@ -21,6 +42,9 @@ export default defineEventHandler(async (event) => {
       columnCount: inspection.columnCount,
     }
   } catch (error) {
+    if (tempFileToCleanupOnError) {
+      cleanupTempFile(tempFileToCleanupOnError)
+    }
     if (isHttpError(error)) {
       throw error
     }

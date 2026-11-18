@@ -45,6 +45,9 @@ export function useClickHouse(): ClickHouseLikeClient {
         username: config.clickhouseUser,
         password: config.clickhousePassword,
         request_timeout: 600_000,
+        keep_alive: {
+          enabled: false,
+        },
       }) as unknown as ClickHouseLikeClient
     } else {
       console.warn('[AI Studio] NUXT_CLICKHOUSE_URL is not configured — using in-memory ClickHouse simulation')

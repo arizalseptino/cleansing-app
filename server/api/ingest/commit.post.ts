@@ -1,11 +1,17 @@
-import { Readable } from 'node:stream'
 import { recordCleansingHistory } from '../../features/cleansing-history'
 import {
+  cleanupTempFile,
+  createChunkedReadable,
   ensureTableDoesNotExist,
+  type IngestRequestPayload,
+  inspectCsvFile,
   inspectCsvPayload,
   isHttpError,
   readIngestPayload,
+  releaseStagedUpload,
   sanitizeIngestErrorMessage,
+  streamCsvBatchesFromBuffer,
+  streamCsvBatchesFromFile,
   validateNewTableName,
   validateTargetColumns,
 } from '../../features/ingest-csv'
@@ -15,6 +21,7 @@ export default defineEventHandler(async (event) => {
   const startedAt = Date.now()
   const client = useClickHouse()
 
+  let payload: IngestRequestPayload | null = null
   let mode: 'file' | 'text' = 'file'
   let sourceLabel = 'unggahan'
   let targetDatabase = ''
@@ -31,7 +38,7 @@ export default defineEventHandler(async (event) => {
   let failureMessage: string | null = null
 
   try {
-    const payload = await readIngestPayload(event)
+    payload = await readIngestPayload(event)
     mode = payload.mode
     sourceLabel = payload.sourceLabel
     targetDatabase = payload.targetDatabase.trim()
@@ -47,11 +54,10 @@ export default defineEventHandler(async (event) => {
     tableName = validateNewTableName(payload.tableName)
     await ensureTableDoesNotExist(client, targetDatabase, tableName)
 
-    const inspection = inspectCsvPayload(
-      payload.textNoBom,
-      payload.delimiterOption,
-      payload.mode === 'file' ? payload.sourceLabel : undefined,
-    )
+    const inspection = payload.mode === 'file'
+      ? await inspectCsvFile(payload.filePath, payload.delimiterOption, payload.sourceLabel)
+      : inspectCsvPayload(payload.textNoBom, payload.delimiterOption)
+
     delimiter = inspection.delimiter
     expectedRowCount = inspection.rowCount
 
@@ -73,28 +79,37 @@ export default defineEventHandler(async (event) => {
     })
     createdNewTable = true
 
-    const rawStream = Readable.from([inspection.normalizedTextBuffer], { objectMode: false })
-    await client.insert({
-      table: `${quotedDb}.${quotedTable}`,
-      columns: quotedColumns,
-      values: rawStream,
-      format: 'CSV',
-      clickhouse_settings: {
-        format_csv_delimiter: delimiter,
-        input_format_csv_skip_first_lines: 1,
-        input_format_csv_detect_header: 0,
-        format_csv_allow_double_quotes: 1,
-        format_csv_allow_single_quotes: 0,
-        input_format_allow_errors_num: 0,
-        input_format_allow_errors_ratio: 0,
-        input_format_csv_allow_variable_number_of_columns: 0,
-        input_format_csv_use_default_on_bad_values: 0,
-        input_format_csv_empty_as_default: 0,
-        format_csv_null_representation: '\\N',
-        input_format_csv_skip_trailing_empty_lines: 1,
-        max_execution_time: 600,
-      },
-    })
+    const insertBatch = async (batchBuf: Buffer) => {
+      await client.insert({
+        table: `${quotedDb}.${quotedTable}`,
+        columns: quotedColumns,
+        values: createChunkedReadable(batchBuf),
+        format: 'CSV',
+        clickhouse_settings: {
+          format_csv_delimiter: delimiter,
+          input_format_csv_skip_first_lines: 0,
+          input_format_csv_detect_header: 0,
+          format_csv_allow_double_quotes: 1,
+          format_csv_allow_single_quotes: 0,
+          input_format_allow_errors_num: 0,
+          input_format_allow_errors_ratio: 0,
+          input_format_csv_allow_variable_number_of_columns: 0,
+          input_format_csv_use_default_on_bad_values: 0,
+          input_format_csv_empty_as_default: 0,
+          format_csv_null_representation: '\\N',
+          input_format_csv_skip_trailing_empty_lines: 1,
+          max_execution_time: 600,
+        },
+      })
+    }
+
+    if (expectedRowCount > 0) {
+      if (payload.mode === 'file') {
+        await streamCsvBatchesFromFile(payload.filePath, inspection.delimiter, insertBatch)
+      } else {
+        await streamCsvBatchesFromBuffer(payload.rawBufferNoBom, inspection.delimiter, insertBatch)
+      }
+    }
 
     const countResult = await client.query({
       query: `SELECT count() AS total FROM ${quotedDb}.${quotedTable}`,
@@ -209,5 +224,13 @@ export default defineEventHandler(async (event) => {
       statusMessage: safeMessage,
       message: safeMessage,
     })
+  } finally {
+    if (payload?.mode === 'file') {
+      if (payload.ownsTempFile) {
+        cleanupTempFile(payload.filePath)
+      } else if (status === 'sukses' && payload.stagedUploadId) {
+        releaseStagedUpload(payload.stagedUploadId)
+      }
+    }
   }
 })

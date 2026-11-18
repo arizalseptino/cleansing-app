@@ -362,7 +362,7 @@
                 <strong>Klik untuk memilih</strong> atau tarik &amp; lepas file ke sini
               </p>
               <p class="dropzone-subtitle">
-                Mendukung format <strong>CSV, TSV, atau TXT</strong> (UTF-8, maks. 50 MB)
+                Mendukung format <strong>CSV, TSV, atau TXT</strong> (UTF-8, streaming tanpa batas ukuran)
               </p>
             </div>
             <div class="dropzone-badge-pill">
@@ -462,7 +462,12 @@
         </div>
 
         <p v-if="ingestInspectPending" class="source-message" role="status">
-          Memeriksa baris judul, pemisah kolom, dan 20 baris contoh...
+          <template v-if="ingestUploadProgress !== null && ingestUploadProgress < 100">
+            Mengunggah file ke server ({{ ingestUploadProgress }}%)...
+          </template>
+          <template v-else>
+            Memeriksa baris judul, pemisah kolom, dan 20 baris contoh...
+          </template>
         </p>
         <p v-if="ingestInspectError" class="source-message source-error" role="alert">
           {{ ingestInspectError }}
@@ -918,6 +923,7 @@ function formatFileSize(bytes: number): string {
 }
 
 type IngestInspectResponse = {
+  uploadId?: string | null
   mode: 'file' | 'text'
   sourceLabel: string
   delimiter: ',' | ';' | '\t' | '|'
@@ -941,7 +947,6 @@ type IngestCommitResponse = {
   historyWarning: string | null
 }
 
-const maxFileBytes = 50 * 1024 * 1024
 const maxTextBytes = 2 * 1024 * 1024
 const newTableNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const columnNamePattern = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
@@ -950,6 +955,8 @@ const showIngestModal = ref(false)
 const ingestMode = ref<'file' | 'text'>('file')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const ingestFile = ref<File | null>(null)
+const ingestUploadId = ref<string | null>(null)
+const ingestUploadProgress = ref<number | null>(null)
 const isDragging = ref(false)
 const ingestPastedText = ref('')
 const ingestDelimiter = ref<string>('auto')
@@ -1014,10 +1021,27 @@ function suggestTableNameFromFilename(filename: string): string {
   return clean.slice(0, 64).replace(/_+$/g, '') || 'tabel_baru'
 }
 
+function releaseStagedUploadId() {
+  const id = ingestUploadId.value
+  ingestUploadId.value = null
+  if (!id) return
+  void fetch(`/api/ingest/upload?uploadId=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {})
+}
+
+function getHttpStatusCode(error: unknown): number | undefined {
+  if (error && typeof error === 'object') {
+    if ('statusCode' in error && typeof error.statusCode === 'number') return error.statusCode
+    if ('status' in error && typeof error.status === 'number') return error.status
+  }
+  return undefined
+}
+
 function openIngestModal() {
+  releaseStagedUploadId()
   showIngestModal.value = true
   ingestMode.value = 'file'
   ingestFile.value = null
+  ingestUploadProgress.value = null
   if (fileInputRef.value) {
     fileInputRef.value.value = ''
   }
@@ -1037,6 +1061,7 @@ function openIngestModal() {
 
 function closeIngestModal() {
   if (ingestCommitPending.value) return
+  releaseStagedUploadId()
   showIngestModal.value = false
   isDragging.value = false
 }
@@ -1049,7 +1074,9 @@ function handleIngestKeydown(event: KeyboardEvent) {
 
 function switchIngestMode(nextMode: 'file' | 'text') {
   if (ingestCommitPending.value || ingestMode.value === nextMode) return
+  releaseStagedUploadId()
   ingestMode.value = nextMode
+  ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
   ingestInspectError.value = ''
@@ -1058,6 +1085,8 @@ function switchIngestMode(nextMode: 'file' | 'text') {
 }
 
 function resetInspectionOnEdit() {
+  releaseStagedUploadId()
+  ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
   ingestInspectError.value = ''
@@ -1104,6 +1133,8 @@ function getFileExtension(name: string): string {
 }
 
 function processSelectedFile(file: File) {
+  releaseStagedUploadId()
+  ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
   ingestInspectError.value = ''
@@ -1126,11 +1157,6 @@ function processSelectedFile(file: File) {
     ingestInspectError.value = 'File yang dipilih kosong.'
     return
   }
-  if (file.size > maxFileBytes) {
-    ingestFile.value = null
-    ingestInspectError.value = 'Ukuran file melebihi batas maksimal 50 MB.'
-    return
-  }
 
   ingestFile.value = file
   if (!ingestTargetTable.value.trim()) {
@@ -1147,6 +1173,49 @@ function handleIngestFileChange(event: Event) {
     return
   }
   processSelectedFile(file)
+}
+
+function uploadMultipartInspect(file: File, delimiter: string): Promise<IngestInspectResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/ingest/inspect')
+
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable && evt.total > 0) {
+        ingestUploadProgress.value = Math.min(100, Math.round((evt.loaded / evt.total) * 100))
+      }
+    }
+
+    xhr.onload = () => {
+      ingestUploadProgress.value = 100
+      let parsed: Record<string, unknown> | null = null
+      try {
+        parsed = JSON.parse(xhr.responseText) as Record<string, unknown>
+      } catch {
+        parsed = null
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300 && parsed) {
+        resolve(parsed as unknown as IngestInspectResponse)
+        return
+      }
+
+      const msg = (parsed && typeof parsed.message === 'string' && parsed.message)
+        || (parsed && typeof parsed.statusMessage === 'string' && parsed.statusMessage)
+        || 'Data tidak dapat diperiksa sebagai CSV/TSV yang valid.'
+      reject({ statusCode: xhr.status, message: msg })
+    }
+
+    xhr.onerror = () => {
+      reject(new Error('Koneksi terputus saat mengunggah file ke server.'))
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('delimiter', delimiter)
+    ingestUploadProgress.value = 0
+    xhr.send(formData)
+  })
 }
 
 async function runIngestInspect(autoDelimiter = false) {
@@ -1174,13 +1243,27 @@ async function runIngestInspect(autoDelimiter = false) {
     let response: IngestInspectResponse
 
     if (ingestMode.value === 'file' && ingestFile.value) {
-      const formData = new FormData()
-      formData.append('file', ingestFile.value)
-      formData.append('delimiter', delimiterToSend)
-      response = await $fetch<IngestInspectResponse>('/api/ingest/inspect', {
-        method: 'POST',
-        body: formData,
-      })
+      if (ingestUploadId.value && !autoDelimiter) {
+        try {
+          response = await $fetch<IngestInspectResponse>('/api/ingest/inspect', {
+            method: 'POST',
+            body: {
+              uploadId: ingestUploadId.value,
+              delimiter: delimiterToSend,
+            },
+          })
+        } catch (err) {
+          if (getHttpStatusCode(err) === 404) {
+            ingestUploadId.value = null
+            response = await uploadMultipartInspect(ingestFile.value, delimiterToSend)
+          } else {
+            throw err
+          }
+        }
+      } else {
+        response = await uploadMultipartInspect(ingestFile.value, delimiterToSend)
+      }
+      ingestUploadId.value = response.uploadId ?? ingestUploadId.value
     } else {
       response = await $fetch<IngestInspectResponse>('/api/ingest/inspect', {
         method: 'POST',
@@ -1203,6 +1286,7 @@ async function runIngestInspect(autoDelimiter = false) {
     ingestInspectError.value = getErrorMessage(error, 'Data tidak dapat diperiksa sebagai CSV/TSV yang valid.')
   } finally {
     ingestInspectPending.value = false
+    ingestUploadProgress.value = null
   }
 }
 
@@ -1218,16 +1302,48 @@ async function submitIngestCommit() {
     let response: IngestCommitResponse
 
     if (ingestMode.value === 'file' && ingestFile.value) {
-      const formData = new FormData()
-      formData.append('file', ingestFile.value)
-      formData.append('delimiter', ingestDelimiter.value)
-      formData.append('targetDatabase', ingestTargetDatabase.value)
-      formData.append('tableName', trimmedTable)
-      formData.append('columns', JSON.stringify(trimmedColumns))
-      response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
-        method: 'POST',
-        body: formData,
-      })
+      if (ingestUploadId.value) {
+        try {
+          response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
+            method: 'POST',
+            body: {
+              uploadId: ingestUploadId.value,
+              delimiter: ingestDelimiter.value,
+              targetDatabase: ingestTargetDatabase.value,
+              tableName: trimmedTable,
+              columns: trimmedColumns,
+            },
+          })
+        } catch (err) {
+          if (getHttpStatusCode(err) === 404) {
+            ingestUploadId.value = null
+            const formData = new FormData()
+            formData.append('file', ingestFile.value)
+            formData.append('delimiter', ingestDelimiter.value)
+            formData.append('targetDatabase', ingestTargetDatabase.value)
+            formData.append('tableName', trimmedTable)
+            formData.append('columns', JSON.stringify(trimmedColumns))
+            response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
+              method: 'POST',
+              body: formData,
+            })
+          } else {
+            throw err
+          }
+        }
+      } else {
+        const formData = new FormData()
+        formData.append('file', ingestFile.value)
+        formData.append('delimiter', ingestDelimiter.value)
+        formData.append('targetDatabase', ingestTargetDatabase.value)
+        formData.append('tableName', trimmedTable)
+        formData.append('columns', JSON.stringify(trimmedColumns))
+        response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
+          method: 'POST',
+          body: formData,
+        })
+      }
+      ingestUploadId.value = null
     } else {
       response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
         method: 'POST',
