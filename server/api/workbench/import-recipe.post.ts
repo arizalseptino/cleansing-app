@@ -4,7 +4,7 @@ import { operations } from '../../workbench/ops'
 import type { OperationParamDefinition, PipelineStep, SourceReference } from '../../workbench/types'
 import { getTableMetadata } from '../../workbench/utils'
 
-const MAX_RECIPE_BYTES = 1024 * 1024 // 1 MB
+const MAX_TEMPLATE_BYTES = 1024 * 1024 // 1 MB
 const MAX_STEPS = 50
 const ALLOWED_ENGINES = new Set(['MergeTree', 'ReplacingMergeTree'])
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
@@ -227,15 +227,15 @@ function validateParamValue(
 
 export default defineEventHandler(async (event) => {
   const contentLength = Number(getHeader(event, 'content-length') ?? 0)
-  if (contentLength > MAX_RECIPE_BYTES + 262_144) {
-    reject(413, 'Ukuran file terlalu besar', 'Ukuran file resep melebihi batas maksimal 1 MB.')
+  if (contentLength > MAX_TEMPLATE_BYTES + 262_144) {
+    reject(413, 'Ukuran file terlalu besar', 'Ukuran file cleansing template melebihi batas maksimal 1 MB.')
   }
 
   let rawBody: unknown
   try {
     rawBody = await readBody(event)
   } catch {
-    reject(400, 'Payload tidak valid', 'Permintaan impor resep tidak dapat dibaca.')
+    reject(400, 'Payload tidak valid', 'Permintaan impor cleansing template tidak dapat dibaca.')
   }
 
   let rawJson = ''
@@ -244,15 +244,15 @@ export default defineEventHandler(async (event) => {
   } else if (isPlainObject(rawBody) && typeof rawBody.rawJson === 'string') {
     rawJson = rawBody.rawJson
   } else {
-    reject(400, 'Payload tidak valid', 'Kirim isi file resep dalam format teks JSON (rawJson).')
+    reject(400, 'Payload tidak valid', 'Kirim isi file cleansing template dalam format teks JSON (rawJson).')
   }
 
   const byteSize = Buffer.byteLength(rawJson, 'utf8')
   if (byteSize === 0) {
-    reject(400, 'File resep kosong', 'File resep kosong dan tidak memiliki data JSON.')
+    reject(400, 'File cleansing template kosong', 'File cleansing template kosong dan tidak memiliki data JSON.')
   }
-  if (byteSize > MAX_RECIPE_BYTES) {
-    reject(400, 'Ukuran file melebihi batas', 'Ukuran file resep melebihi batas maksimal 1 MB.')
+  if (byteSize > MAX_TEMPLATE_BYTES) {
+    reject(400, 'Ukuran file melebihi batas', 'Ukuran file cleansing template melebihi batas maksimal 1 MB.')
   }
 
   let parsed: unknown
@@ -263,20 +263,20 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!isPlainObject(parsed)) {
-    reject(400, 'Struktur resep tidak valid', 'Isi file resep harus berupa objek JSON.')
+    reject(400, 'Struktur cleansing template tidak valid', 'Isi file cleansing template harus berupa objek JSON.')
   }
 
   if (parsed.version !== 1) {
     reject(
       400,
       'Versi format tidak didukung',
-      `Versi format resep "${String(parsed.version ?? 'tidak ada')}" tidak didukung. Hanya versi 1 yang didukung.`,
+      `Versi format cleansing template "${String(parsed.version ?? 'tidak ada')}" tidak didukung. Hanya versi 1 yang didukung.`,
     )
   }
 
-  const recipeName = typeof parsed.name === 'string' ? parsed.name.trim() : ''
-  if (!recipeName || recipeName.length > 120) {
-    reject(400, 'Nama resep tidak valid', 'Nama resep wajib berupa teks (1 sampai 120 karakter).')
+  const templateName = typeof parsed.name === 'string' ? parsed.name.trim() : ''
+  if (!templateName || templateName.length > 120) {
+    reject(400, 'Nama cleansing template tidak valid', 'Nama cleansing template wajib berupa teks (1 sampai 120 karakter).')
   }
 
   const createdAt = typeof parsed.createdAt === 'string' ? parsed.createdAt.slice(0, 64) : ''
@@ -320,10 +320,10 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!Array.isArray(parsed.steps)) {
-    reject(400, 'Daftar langkah tidak valid', 'Resep wajib memiliki daftar langkah (steps) berupa array.')
+    reject(400, 'Daftar langkah tidak valid', 'Cleansing template wajib memiliki daftar langkah (steps) berupa array.')
   }
   if (parsed.steps.length > MAX_STEPS) {
-    reject(400, 'Terlalu banyak langkah', `Jumlah langkah dalam resep (${parsed.steps.length}) melebihi batas maksimal ${MAX_STEPS} langkah.`)
+    reject(400, 'Terlalu banyak langkah', `Jumlah langkah dalam cleansing template (${parsed.steps.length}) melebihi batas maksimal ${MAX_STEPS} langkah.`)
   }
 
   const sanitizedSteps: Array<PipelineStep & { id: string }> = parsed.steps.map((rawStep, index) => {
@@ -422,7 +422,7 @@ export default defineEventHandler(async (event) => {
       stepStatuses.push({
         index: i,
         valid: false,
-        error: 'Pilih database dan tabel sumber untuk memvalidasi langkah resep.',
+        error: 'Pilih database dan tabel sumber untuk memvalidasi langkah cleansing template.',
       })
     }
   }
@@ -430,7 +430,7 @@ export default defineEventHandler(async (event) => {
   return {
     recipe: {
       version: 1,
-      name: recipeName,
+      name: templateName,
       createdAt,
       suggestedSource,
       saveOptions,

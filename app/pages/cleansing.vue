@@ -132,7 +132,7 @@
 
         <div v-if="importSummary" class="wb-import-summary" role="status">
           <p>
-            <strong>Resep "{{ importSummary.name }}":</strong>
+            <strong>Cleansing template "{{ importSummary.name }}":</strong>
             {{ importSummary.valid }} langkah valid, {{ importSummary.invalid }} langkah bermasalah.
           </p>
           <p v-if="importSummary.suggestedSourceNote" class="wb-import-note">
@@ -160,17 +160,17 @@
           Lihat SQL
         </button>
 
-        <div class="wb-recipe-actions">
+        <div class="wb-template-actions">
           <button
             class="wb-button wb-small"
             type="button"
             :disabled="!sourceReady || pipeline.steps.length === 0"
             @click="openExportDialog"
           >
-            Ekspor resep
+            Ekspor cleansing template
           </button>
           <button class="wb-button wb-small" type="button" @click="openImportDialog">
-            Impor resep
+            Impor cleansing template
           </button>
         </div>
       </section>
@@ -674,15 +674,15 @@
       @keydown="handleDialogKeydown"
     >
       <div class="wb-dialog-heading">
-        <h2 id="wb-export-title" class="card-title">Ekspor resep pipeline</h2>
+        <h2 id="wb-export-title" class="card-title">Ekspor cleansing template pipeline</h2>
         <button class="wb-icon-button" type="button" @click="showExportDialog = false">Tutup</button>
       </div>
-      <form class="wb-save-form" @submit.prevent="downloadRecipe">
+      <form class="wb-save-form" @submit.prevent="downloadCleansingTemplate">
         <p class="wb-message">
-          File resep JSON hanya berisi definisi langkah dan opsi simpan. Tidak ada data baris atau kredensial di dalamnya.
+          File cleansing template JSON hanya berisi definisi langkah dan opsi simpan. Tidak ada data baris atau kredensial di dalamnya.
         </p>
-        <label for="wb-recipe-name">Nama resep</label>
-        <input id="wb-recipe-name" v-model="exportRecipeName" maxlength="120" required placeholder="Contoh: Standarisasi Data Pelanggan" />
+        <label for="wb-template-name">Nama cleansing template</label>
+        <input id="wb-template-name" v-model="exportTemplateName" maxlength="120" required placeholder="Contoh: Standarisasi Data Pelanggan" />
         <dl class="wb-summary">
           <div><dt>Versi format</dt><dd>1</dd></div>
           <div><dt>Saran sumber</dt><dd><code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> (tidak mengikat)</dd></div>
@@ -691,7 +691,7 @@
         </dl>
         <p v-if="exportError" class="wb-error" role="alert">{{ exportError }}</p>
         <div class="wb-dialog-actions">
-          <button class="wb-button wb-primary" type="submit" :disabled="!exportRecipeName.trim()">
+          <button class="wb-button wb-primary" type="submit" :disabled="!exportTemplateName.trim()">
             Unduh file .json
           </button>
           <button class="wb-button" type="button" @click="showExportDialog = false">Batal</button>
@@ -709,34 +709,34 @@
       @keydown="handleDialogKeydown"
     >
       <div class="wb-dialog-heading">
-        <h2 id="wb-import-title" class="card-title">Impor resep pipeline</h2>
-        <button class="wb-icon-button" type="button" :disabled="importingRecipe" @click="showImportDialog = false">Tutup</button>
+        <h2 id="wb-import-title" class="card-title">Impor cleansing template pipeline</h2>
+        <button class="wb-icon-button" type="button" :disabled="importingTemplate" @click="showImportDialog = false">Tutup</button>
       </div>
       <div class="wb-save-form">
         <p class="wb-message">
-          Pilih atau tarik file resep <code>.json</code> (maksimal 1 MB). Setiap langkah akan divalidasi ulang terhadap skema tabel sumber yang sedang dipilih.
+          Pilih atau tarik file cleansing template <code>.json</code> (maksimal 1 MB). Setiap langkah akan divalidasi ulang terhadap skema tabel sumber yang sedang dipilih.
         </p>
         <div
           class="wb-dropzone"
           :class="{ 'wb-dropzone-active': importDragActive }"
           @dragover.prevent="importDragActive = true"
           @dragleave.prevent="importDragActive = false"
-          @drop.prevent="handleRecipeDrop"
+          @drop.prevent="handleTemplateDrop"
         >
-          <p>{{ importingRecipe ? 'Memvalidasi resep di server...' : 'Tarik dan lepas file .json ke sini' }}</p>
+          <p>{{ importingTemplate ? 'Memvalidasi cleansing template di server...' : 'Tarik dan lepas file .json ke sini' }}</p>
           <span>atau</span>
           <label class="wb-button wb-small wb-file-label">
             Pilih file JSON
             <input
               type="file"
               accept=".json,application/json"
-              :disabled="importingRecipe"
-              @change="handleRecipeFileChange"
+              :disabled="importingTemplate"
+              @change="handleTemplateFileChange"
             />
           </label>
         </div>
         <p v-if="!sourceReady" class="wb-warning" role="status">
-          Belum ada tabel sumber yang dipilih. Langkah resep tetap dapat dimuat, lalu akan divalidasi saat Anda memilih database dan tabel.
+          Belum ada tabel sumber yang dipilih. Langkah cleansing template tetap dapat dimuat, lalu akan divalidasi saat Anda memilih database dan tabel.
         </p>
         <p v-if="importError" class="wb-error" role="alert">{{ importError }}</p>
       </div>
@@ -757,7 +757,7 @@
       </div>
       <form class="wb-save-form" @submit.prevent="applyColumnMapping">
         <p class="wb-message">
-          Pilih kolom pengganti dari tabel <code>{{ pipeline.source.table }}</code> untuk kolom resep yang tidak ditemukan.
+          Pilih kolom pengganti dari tabel <code>{{ pipeline.source.table }}</code> untuk kolom cleansing template yang tidak ditemukan.
         </p>
         <div v-for="item in missingColumnReferences" :key="item.column" class="wb-mapping-row">
           <div>
@@ -869,7 +869,7 @@ type DisplayFilter = {
   value?: string | null
   label: string
 }
-type ImportRecipeResponse = {
+type ImportTemplateResponse = {
   recipe: {
     version: number
     name: string
@@ -949,11 +949,11 @@ const selectedRareKeys = ref<string[]>([])
 const displayFilter = ref<DisplayFilter | null>(null)
 
 const showExportDialog = ref(false)
-const exportRecipeName = ref('')
+const exportTemplateName = ref('')
 const exportError = ref('')
 const showImportDialog = ref(false)
 const importDragActive = ref(false)
-const importingRecipe = ref(false)
+const importingTemplate = ref(false)
 const importError = ref('')
 const importSummary = ref<{ name: string; valid: number; invalid: number; suggestedSourceNote: string } | null>(null)
 const showMappingDialog = ref(false)
@@ -1700,7 +1700,7 @@ function openResultExportDialog(): void {
 }
 
 function closePanels(): void {
-  if (!applying.value && !importingRecipe.value) {
+  if (!applying.value && !importingTemplate.value) {
     showSqlPanel.value = false
     showExportDialog.value = false
     showImportDialog.value = false
@@ -1805,15 +1805,15 @@ function createReplaceFromRare(): void {
 
 function openExportDialog(): void {
   if (!sourceReady.value || pipeline.value.steps.length === 0) return
-  exportRecipeName.value = `Resep ${pipeline.value.source.table}`
+  exportTemplateName.value = `Cleansing Template ${pipeline.value.source.table}`
   exportError.value = ''
   showExportDialog.value = true
 }
 
-function downloadRecipe(): void {
-  const name = exportRecipeName.value.trim()
+function downloadCleansingTemplate(): void {
+  const name = exportTemplateName.value.trim()
   if (!name) {
-    exportError.value = 'Nama resep wajib diisi.'
+    exportError.value = 'Nama cleansing template wajib diisi.'
     return
   }
   const payload = {
@@ -1836,7 +1836,7 @@ function downloadRecipe(): void {
   }
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'resep-cleansing'
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cleansing-template'
   const link = document.createElement('a')
   link.href = url
   link.download = `${slug}.json`
@@ -1853,13 +1853,13 @@ function openImportDialog(): void {
   showImportDialog.value = true
 }
 
-function handleRecipeDrop(event: DragEvent): void {
+function handleTemplateDrop(event: DragEvent): void {
   importDragActive.value = false
   const file = event.dataTransfer?.files?.[0]
   if (file) void processImportFile(file)
 }
 
-function handleRecipeFileChange(event: Event): void {
+function handleTemplateFileChange(event: Event): void {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
@@ -1869,13 +1869,13 @@ function handleRecipeFileChange(event: Event): void {
 async function processImportFile(file: File): Promise<void> {
   importError.value = ''
   if (file.size > 1024 * 1024) {
-    importError.value = 'Ukuran file resep melebihi batas maksimal 1 MB.'
+    importError.value = 'Ukuran file cleansing template melebihi batas maksimal 1 MB.'
     return
   }
-  importingRecipe.value = true
+  importingTemplate.value = true
   try {
     const rawJson = await file.text()
-    const response = await $fetch<ImportRecipeResponse>('/api/workbench/import-recipe', {
+    const response = await $fetch<ImportTemplateResponse>('/api/workbench/import-recipe', {
       method: 'POST',
       body: {
         rawJson,
@@ -1899,7 +1899,7 @@ async function processImportFile(file: File): Promise<void> {
 
     const suggested = response.recipe.suggestedSource
     const suggestedSourceNote = suggested && (suggested.database !== pipeline.value.source.database || suggested.table !== pipeline.value.source.table)
-      ? `Saran sumber resep: ${suggested.database}.${suggested.table} (hanya saran, tetap menggunakan tabel sumber saat ini).`
+      ? `Saran sumber cleansing template: ${suggested.database}.${suggested.table} (hanya saran, tetap menggunakan tabel sumber saat ini).`
       : ''
 
     importSummary.value = {
@@ -1913,9 +1913,9 @@ async function processImportFile(file: File): Promise<void> {
     await refreshStepSchemas()
     void loadPreview()
   } catch (error) {
-    importError.value = getErrorMessage(error, 'File resep tidak dapat diimpor.')
+    importError.value = getErrorMessage(error, 'File cleansing template tidak dapat diimpor.')
   } finally {
-    importingRecipe.value = false
+    importingTemplate.value = false
   }
 }
 
@@ -2901,7 +2901,7 @@ onMounted(async () => {
   }
 }
 
-.wb-recipe-actions {
+.wb-template-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
