@@ -14,8 +14,8 @@ import { validateDatabase } from './metadata'
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_COLUMNS = 200
 export const PREVIEW_ROW_LIMIT = 20
-export const BATCH_MAX_BYTES = 2 * 1024 * 1024
-export const BATCH_MAX_ROWS = 10_000
+export const BATCH_MAX_BYTES = 8 * 1024 * 1024
+export const BATCH_MAX_ROWS = 50_000
 export const STREAM_CHUNK_BYTES = 64 * 1024
 const STAGED_UPLOAD_TTL_MS = 30 * 60 * 1000
 
@@ -1403,6 +1403,58 @@ export async function insertCsvBatchHttp(params: {
       return
     }
     throw err
+  }
+}
+
+export async function pingClickHouseHttp(clickhouseUrl: string): Promise<{ alive: boolean; note: string }> {
+  const url = new URL(clickhouseUrl.trim())
+  url.username = ''
+  url.password = ''
+  url.pathname = '/ping'
+  url.search = ''
+  const isHttps = url.protocol === 'https:'
+  const transport = isHttps ? https : http
+
+  const checkOnce = (forceIpv4: boolean) => new Promise<string>((resolve, reject) => {
+    const req = transport.request(url, {
+      method: 'GET',
+      agent: false,
+      timeout: 4000,
+      ...(forceIpv4 ? { family: 4 } : {}),
+      headers: { Connection: 'close' },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer | string) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8').trim()
+        if ((res.statusCode ?? 500) < 400) {
+          resolve(body || 'Ok.')
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${body}`))
+        }
+      })
+      res.on('error', reject)
+    })
+    req.on('timeout', () => req.destroy(new Error('timeout')))
+    req.on('error', reject)
+    req.end()
+  })
+
+  try {
+    const res = await checkOnce(false)
+    return { alive: true, note: `Server ClickHouse merespons (${res})` }
+  } catch (firstErr) {
+    if (url.hostname.toLowerCase() === 'localhost') {
+      try {
+        const res = await checkOnce(true)
+        return { alive: true, note: `Server ClickHouse merespons via 127.0.0.1 (${res})` }
+      } catch (secondErr) {
+        const msg = secondErr instanceof Error ? secondErr.message : String(secondErr)
+        return { alive: false, note: `Server ClickHouse mati/tidak merespons (${msg})` }
+      }
+    }
+    const msg = firstErr instanceof Error ? firstErr.message : String(firstErr)
+    return { alive: false, note: `Server ClickHouse mati/tidak merespons (${msg})` }
   }
 }
 

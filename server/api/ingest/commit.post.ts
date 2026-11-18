@@ -8,6 +8,7 @@ import {
   inspectCsvFile,
   inspectCsvPayload,
   isHttpError,
+  pingClickHouseHttp,
   readIngestPayload,
   releaseStagedUpload,
   sanitizeIngestErrorMessage,
@@ -18,9 +19,16 @@ import {
 } from '../../features/ingest-csv'
 import { quoteIdentifier } from '../../features/metadata'
 
-async function checkClickHouseAlive(client: ReturnType<typeof useClickHouse>): Promise<{ alive: boolean; note: string }> {
+async function checkClickHouseAlive(
+  client: ReturnType<typeof useClickHouse>,
+  clickhouseUrl?: string,
+): Promise<{ alive: boolean; note: string }> {
+  await new Promise((r) => setTimeout(r, 250))
+  if (clickhouseUrl && clickhouseUrl.trim()) {
+    return pingClickHouseHttp(clickhouseUrl)
+  }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 5000)
+  const timer = setTimeout(() => controller.abort(), 4000)
   try {
     await client.query({
       query: 'SELECT 1',
@@ -120,6 +128,10 @@ export default defineEventHandler(async (event) => {
       input_format_csv_empty_as_default: 0,
       format_csv_null_representation: '\\N',
       input_format_csv_skip_trailing_empty_lines: 1,
+      input_format_parallel_parsing: 0,
+      max_threads: 1,
+      max_insert_threads: 1,
+      max_memory_usage: 536870912,
       max_execution_time: 600,
     }
 
@@ -219,7 +231,7 @@ export default defineEventHandler(async (event) => {
 
     let livenessNote = ''
     if (isConnError) {
-      const health = await checkClickHouseAlive(client)
+      const health = await checkClickHouseAlive(client, config.clickhouseUrl)
       livenessNote = health.note
     }
 
