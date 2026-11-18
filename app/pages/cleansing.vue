@@ -2905,7 +2905,39 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e8eff5;
+}
+
+.wb-template-actions .wb-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: #40566d;
+  background: #fff;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.wb-template-actions .wb-button:hover:not(:disabled) {
+  border-color: #b8cde0;
+  background: #f8fbfe;
+}
+
+.wb-template-actions .wb-button:disabled {
+  color: #8998a8;
+  background: #f5f8fa;
 }
 
 .wb-import-summary {
