@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import https from 'node:https'
@@ -1032,6 +1033,336 @@ export async function streamCsvBatchesFromBuffer(
   onBatch: (batchBuffer: Buffer, rowCount: number) => Promise<void>,
 ): Promise<number> {
   return streamCsvBatchesFromReadable(createChunkedReadable(bufferNoBom, 256 * 1024), delimiter, onBatch)
+}
+
+async function* streamCsvFileWithoutHeader(
+  filePath: string,
+  delimiter: SupportedDelimiter,
+): AsyncGenerator<Buffer> {
+  const stream = fs.createReadStream(filePath, { highWaterMark: 256 * 1024 })
+  const bomState = { bomHandled: false, bomBuffer: Buffer.alloc(0) }
+  const delimiterByte = delimiter.charCodeAt(0)
+  let headerSkipped = false
+  let skipLeadingLineFeed = false
+  let inQuotes = false
+  let atFieldStart = true
+  let pendingQuoteInQuotes = false
+
+  for await (const rawChunk of stream) {
+    const rawBuffer = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk)
+    const buffer = stripLeadingBomBytes(rawBuffer, bomState)
+    if (buffer.length === 0) continue
+
+    if (headerSkipped) {
+      const start = skipLeadingLineFeed && buffer[0] === 0x0A ? 1 : 0
+      skipLeadingLineFeed = false
+      if (start < buffer.length) yield buffer.subarray(start)
+      continue
+    }
+
+    let i = 0
+    while (i < buffer.length) {
+      const byte = buffer[i]!
+
+      if (pendingQuoteInQuotes) {
+        pendingQuoteInQuotes = false
+        if (byte === 0x22) {
+          i += 1
+          continue
+        }
+        inQuotes = false
+      }
+
+      if (inQuotes) {
+        if (byte === 0x22) {
+          if (i + 1 < buffer.length) {
+            if (buffer[i + 1] === 0x22) {
+              i += 2
+              continue
+            }
+            inQuotes = false
+            i += 1
+            continue
+          }
+          pendingQuoteInQuotes = true
+          i += 1
+          continue
+        }
+        i += 1
+        continue
+      }
+
+      if (byte === 0x22 && atFieldStart) {
+        inQuotes = true
+        atFieldStart = false
+        i += 1
+        continue
+      }
+
+      if (byte === delimiterByte) {
+        atFieldStart = true
+        i += 1
+        continue
+      }
+
+      if (byte === 0x0D || byte === 0x0A) {
+        headerSkipped = true
+        const nextByte = buffer[i + 1]
+        const start = byte === 0x0D && nextByte === 0x0A ? i + 2 : i + 1
+        skipLeadingLineFeed = byte === 0x0D && i + 1 === buffer.length
+        if (start < buffer.length) yield buffer.subarray(start)
+        break
+      }
+
+      if (byte !== 0x20 && byte !== 0x09) {
+        atFieldStart = false
+      }
+      i += 1
+    }
+  }
+
+  if (!headerSkipped) {
+    throw new Error('Baris header CSV tidak ditemukan saat mengirim data ke ClickHouse.')
+  }
+}
+
+type ClickHouseClientCommand = {
+  executable: string
+  prefixArgs: string[]
+  clientArgs: string[]
+}
+
+function getClickHouseClientCommands(): ClickHouseClientCommand[] {
+  const configuredBin = process.env.NUXT_CLICKHOUSE_CLIENT_BIN?.trim()
+  if (configuredBin) {
+    const executable = configuredBin
+    const executableName = path.basename(executable).replace(/\.exe$/i, '').toLowerCase()
+    if (executableName === 'wsl') {
+      return [{
+        executable,
+        prefixArgs: [
+          '--exec',
+          'sh',
+          '-lc',
+          'binary="$1"; shift; exec "$binary" "$@"',
+          '--',
+        ],
+        clientArgs: ['clickhouse', 'client'],
+      }]
+    }
+    return [{
+      executable,
+      prefixArgs: [],
+      clientArgs: executableName === 'clickhouse-client' ? [] : ['client'],
+    }]
+  }
+
+  if (process.platform === 'win32') {
+    const wslPrefix = [
+      '--exec',
+      'sh',
+      '-lc',
+      'binary="$1"; shift; exec "$binary" "$@"',
+      '--',
+    ]
+    return [
+      { executable: 'wsl.exe', prefixArgs: wslPrefix, clientArgs: ['clickhouse', 'client'] },
+      { executable: 'wsl.exe', prefixArgs: wslPrefix, clientArgs: ['clickhouse-client'] },
+    ]
+  }
+
+  return [
+    { executable: 'clickhouse', prefixArgs: [], clientArgs: ['client'] },
+    { executable: 'clickhouse-client', prefixArgs: [], clientArgs: [] },
+  ]
+}
+
+async function clickHouseClientAvailable(command: ClickHouseClientCommand): Promise<boolean> {
+  const args = [...command.prefixArgs, ...command.clientArgs, '--version']
+  const result = await new Promise<{ code: number | null; stderr: string; error?: NodeJS.ErrnoException }>((resolve) => {
+    const child = spawn(command.executable, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
+    let stderr = ''
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr = `${stderr}${chunk.toString()}`.slice(-8192)
+    })
+    child.once('error', (error: NodeJS.ErrnoException) => resolve({ code: null, stderr, error }))
+    child.once('close', (code) => resolve({ code, stderr }))
+  })
+
+  if (result.error?.code === 'ENOENT') return false
+  if (result.error) {
+    throw new Error(`Tidak dapat menjalankan clickhouse client: ${result.error.message}`)
+  }
+  if (result.code === 0) return true
+
+  const output = result.stderr.trim()
+  if (
+    (result.code === 127 || result.code === 1)
+    && /(?:clickhouse|command).*?(?:not found|does not exist|no such file or directory)/i.test(output)
+  ) {
+    return false
+  }
+  throw new Error(output || `Pemeriksaan clickhouse client gagal (exit code ${result.code ?? 'tidak diketahui'}).`)
+}
+
+async function resolveWslFilePath(filePath: string): Promise<string> {
+  const result = await new Promise<{ code: number | null; stdout: string; stderr: string; error?: NodeJS.ErrnoException }>((resolve) => {
+    const child = spawn('wsl.exe', ['--exec', 'wslpath', '-a', filePath], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout = `${stdout}${chunk.toString()}`
+    })
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr = `${stderr}${chunk.toString()}`.slice(-8192)
+    })
+    child.once('error', (error: NodeJS.ErrnoException) => resolve({ code: null, stdout, stderr, error }))
+    child.once('close', (code) => resolve({ code, stdout, stderr }))
+  })
+
+  if (result.error) {
+    throw new Error(`Tidak dapat menerjemahkan lokasi file untuk WSL: ${result.error.message}`)
+  }
+  if (result.code !== 0 || !result.stdout.trim()) {
+    throw new Error(result.stderr.trim() || 'WSL tidak dapat menemukan lokasi file CSV sementara.')
+  }
+  return result.stdout.trim()
+}
+
+export async function insertCsvFileWithClickHouseClient(params: {
+  clickhouseUrl: string
+  clickhouseUser: string
+  clickhousePassword: string
+  filePath: string
+  delimiter: SupportedDelimiter
+  table: string
+  columns: string[]
+  clickhouseSettings: Record<string, string | number>
+}): Promise<boolean> {
+  let command: ClickHouseClientCommand | undefined
+  for (const candidate of getClickHouseClientCommands()) {
+    if (await clickHouseClientAvailable(candidate)) {
+      command = candidate
+      break
+    }
+  }
+  if (!command) return false
+
+  const url = new URL(params.clickhouseUrl.trim())
+  const username = params.clickhouseUser || (url.username ? decodeURIComponent(url.username) : 'default')
+  const password = params.clickhousePassword || (url.password ? decodeURIComponent(url.password) : '')
+  const query = `INSERT INTO ${params.table} (${params.columns.join(', ')}) FORMAT CSV`
+  const usesWsl = process.platform === 'win32'
+    && path.basename(command.executable).replace(/\.exe$/i, '').toLowerCase() === 'wsl'
+  const wslInputPath = usesWsl ? await resolveWslFilePath(params.filePath) : null
+  const prefixArgs = wslInputPath
+    ? [
+        '--exec',
+        'sh',
+        '-lc',
+        'file="$1"; shift; binary="$1"; shift; exec "$binary" "$@" < "$file"',
+        '--',
+        wslInputPath,
+      ]
+    : command.prefixArgs
+  const clickhouseSettings = {
+    ...params.clickhouseSettings,
+    input_format_csv_empty_as_default: 1,
+    ...(wslInputPath ? { input_format_csv_skip_first_lines: 1 } : {}),
+  }
+  const args = [
+    ...prefixArgs,
+    ...command.clientArgs,
+    `--host=${url.hostname}`,
+    '--port=9000',
+    `--user=${username}`,
+    `--password=${password}`,
+    `--format_csv_delimiter=${params.delimiter}`,
+    ...Object.entries(clickhouseSettings)
+      .filter(([key]) => key !== 'format_csv_delimiter')
+      .map(([key, value]) => `--${key}=${String(value)}`),
+    `--query=${query}`,
+  ]
+  const child = spawn(command.executable, args, {
+    stdio: ['pipe', 'ignore', 'pipe'],
+    windowsHide: true,
+  })
+  let stderr = ''
+  let stdinError: Error | null = null
+  child.stderr.on('data', (chunk: Buffer | string) => {
+    stderr = `${stderr}${chunk.toString()}`.slice(-65536)
+  })
+  child.stdin.on('error', (error) => {
+    stdinError = error
+  })
+
+  const completed = new Promise<void>((resolve, reject) => {
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      reject(new Error(`Tidak dapat menjalankan clickhouse client: ${error.message}`))
+    })
+    child.once('close', (code, signal) => {
+      if (code === 0) {
+        resolve()
+        return
+      }
+      const detail = stderr.trim()
+      reject(new Error(
+        detail
+          ? `clickhouse client gagal${code === null ? ` (${signal ?? 'proses dihentikan'})` : ` (exit code ${code})`}: ${detail}`
+          : `clickhouse client gagal (exit code ${code ?? signal ?? 'tidak diketahui'}).`,
+      ))
+    })
+  })
+  void completed.catch(() => {})
+
+  const waitForStdinDrain = () => new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      child.stdin.removeListener('drain', onDrain)
+      child.stdin.removeListener('error', onError)
+      child.removeListener('close', onClose)
+    }
+    const onDrain = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = (error: Error) => {
+      cleanup()
+      reject(error)
+    }
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup()
+      reject(new Error(`clickhouse client berhenti sebelum stdin siap (${code ?? signal ?? 'tidak diketahui'}).`))
+    }
+
+    child.stdin.once('drain', onDrain)
+    child.stdin.once('error', onError)
+    child.once('close', onClose)
+  })
+
+  try {
+    if (wslInputPath) {
+      child.stdin.end()
+    } else {
+      for await (const chunk of streamCsvFileWithoutHeader(params.filePath, params.delimiter)) {
+        if (stdinError) throw stdinError
+        if (!child.stdin.write(chunk)) {
+          await waitForStdinDrain()
+        }
+        if (stdinError) throw stdinError
+      }
+      child.stdin.end()
+    }
+    await completed
+    return true
+  } catch (error) {
+    child.stdin.destroy()
+    if (child.exitCode === null && child.signalCode === null) child.kill()
+    await completed.catch(() => {})
+    throw error
+  }
 }
 
 async function parseStreamingMultipart(event: H3Event): Promise<{

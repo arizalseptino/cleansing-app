@@ -5,6 +5,7 @@ import {
   createChunkedReadable,
   ensureTableDoesNotExist,
   type IngestRequestPayload,
+  insertCsvFileWithClickHouseClient,
   insertCsvBatchHttp,
   inspectCsvFile,
   inspectCsvPayload,
@@ -109,8 +110,10 @@ export default defineEventHandler(async (event) => {
     quotedTable = quoteIdentifier(tableName)
     quotedStagingTable = quoteIdentifier(stagingTableName)
     const quotedColumns = targetColumns.map(quoteIdentifier)
+    // Keep CSV empty values as strings while avoiding ClickHouse's unsafe disabled-setting path.
+    const stagingColumnDefault = hasRealClickHouse ? " DEFAULT ''" : ''
     const columnDefinitions = quotedColumns
-      .map((colSql) => `${colSql} Nullable(String)`)
+      .map((colSql) => `${colSql} Nullable(String)${stagingColumnDefault}`)
       .join(', ')
 
     currentStage = 'buat_tabel_sementara'
@@ -153,7 +156,10 @@ export default defineEventHandler(async (event) => {
           table: `${quotedDb}.${quotedStagingTable}`,
           columns: quotedColumns,
           batchBuffer: batchBuf,
-          clickhouseSettings: csvInsertSettings,
+          clickhouseSettings: {
+            ...csvInsertSettings,
+            input_format_csv_empty_as_default: 1,
+          },
         })
       } else {
         await client.insert({
@@ -168,7 +174,24 @@ export default defineEventHandler(async (event) => {
 
     if (expectedRowCount > 0) {
       if (payload.mode === 'file') {
-        await streamCsvBatchesFromFile(payload.filePath, inspection.delimiter, insertBatch)
+        if (hasRealClickHouse) {
+          currentStage = 'kirim_csv_clickhouse_client'
+          const insertedWithClient = await insertCsvFileWithClickHouseClient({
+            clickhouseUrl: config.clickhouseUrl,
+            clickhouseUser: config.clickhouseUser,
+            clickhousePassword: config.clickhousePassword,
+            filePath: payload.filePath,
+            delimiter: inspection.delimiter,
+            table: `${quotedDb}.${quotedStagingTable}`,
+            columns: quotedColumns,
+            clickhouseSettings: csvInsertSettings,
+          })
+          if (!insertedWithClient) {
+            await streamCsvBatchesFromFile(payload.filePath, inspection.delimiter, insertBatch)
+          }
+        } else {
+          await streamCsvBatchesFromFile(payload.filePath, inspection.delimiter, insertBatch)
+        }
       } else {
         await streamCsvBatchesFromBuffer(payload.rawBufferNoBom, inspection.delimiter, insertBatch)
       }
@@ -195,6 +218,12 @@ export default defineEventHandler(async (event) => {
     }
 
     currentStage = 'finalisasi_tabel'
+    if (hasRealClickHouse) {
+      await client.command({
+        query: `ALTER TABLE ${quotedDb}.${quotedStagingTable} ${quotedColumns.map((colSql) => `MODIFY COLUMN ${colSql} REMOVE DEFAULT`).join(', ')}`,
+        clickhouse_settings: { max_execution_time: 60 },
+      })
+    }
     await ensureTableDoesNotExist(client, targetDatabase, tableName)
     await client.command({
       query: `RENAME TABLE ${quotedDb}.${quotedStagingTable} TO ${quotedDb}.${quotedTable}`,
