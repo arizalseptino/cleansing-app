@@ -1,0 +1,219 @@
+arizal@DESKTOP-DN8657N:~/clickhouse-ext4$ tail -n 120 ~/clickhouse-ext4/.clickhouse/servers/default/server.log
+2026.11.18 11:38:25.853370 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:25.853427 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Trace> Planner: Query from stage FetchColumns to stage Complete
+2026.11.18 11:38:25.853539 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:25.855067 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Debug> executeQuery: Read 1 rows, 26.00 B in 0.002 sec., 429.185 rows/sec., 10.90 KiB/sec.
+2026.11.18 11:38:25.855358 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 11:38:25.855375 [ 18305 ] {88008772-2516-4ad3-a5a1-710a810bab51} <Debug> MemoryTracker: Query peak memory usage: 4.10 MiB.
+2026.11.18 11:38:25.855385 [ 18305 ] {} <Debug> HTTP-Session-98c3d602-57c5-4de4-8ed3-e027c0f5efb4: 98c3d602-57c5-4de4-8ed3-e027c0f5efb4 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:25.865995 [ 18305 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:41300, User-Agent: clickhouse-js/1.25.0 (lv:nodejs/v24.22.1; os:win32), Content Type: , Transfer Encoding: chunked, X-Forwarded-For: (none)
+2026.11.18 11:38:25.866076 [ 18305 ] {} <Trace> DynamicQueryHandler: Request URI: /?query_id=85d331cf-7a44-42f3-bcc4-1bf9bac5476b&param_database=belajar_clickhouse&param_table=sipka_peserta_202610050925_uji4&readonly=1&max_execution_time=15&default_format=JSONEachRow
+2026.11.18 11:38:25.866100 [ 18305 ] {} <Debug> HTTP-Session-0d391354-94d3-4b3f-bb8b-3a6113e7cfe4: Authenticating user 'default' from [::1]:41300
+2026.11.18 11:38:25.866123 [ 18305 ] {} <Debug> HTTP-Session-0d391354-94d3-4b3f-bb8b-3a6113e7cfe4: 0d391354-94d3-4b3f-bb8b-3a6113e7cfe4 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:25.866128 [ 18305 ] {} <Debug> HTTP-Session-0d391354-94d3-4b3f-bb8b-3a6113e7cfe4: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:25.866205 [ 18305 ] {} <Trace> HTTP-Session-0d391354-94d3-4b3f-bb8b-3a6113e7cfe4: 0d391354-94d3-4b3f-bb8b-3a6113e7cfe4 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 11:38:25.866263 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> HTTPServerRequest: creating in_post id 125106576186400
+2026.11.18 11:38:25.866463 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> executeQuery: (from [::1]:41300) SELECT name FROM system.tables WHERE (database = 'belajar_clickhouse') AND (name = 'sipka_peserta_202610050925_uji4') LIMIT 1 (stage: Complete)
+2026.11.18 11:38:25.867242 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Trace> Planner: Query to stage Complete
+2026.11.18 11:38:25.867291 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:25.867365 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Trace> Planner: Query from stage FetchColumns to stage Complete
+2026.11.18 11:38:25.867551 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:25.867815 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.dummy_replacing': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867817 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.dummy_replacing': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867819 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.uji_peserta': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867820 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.uji_peserta': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867822 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.uji_besar_curl': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867823 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.uji_besar_curl': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867826 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.__tes_crash': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867830 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.__tes_crash': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867832 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.dummy_users': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867839 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.dummy_users': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867841 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.__tmp_ingest_299f3d5f2f09': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867843 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.__tmp_ingest_299f3d5f2f09': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867844 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.kecil50k': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867846 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.kecil50k': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867848 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.dummy_aggregating': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867850 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.dummy_aggregating': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.867852 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'startup table belajar_clickhouse.dummy_summing': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:25.867853 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> AsyncLoader: Prioritize load job 'load table belajar_clickhouse.dummy_summing': BackgroundLoad -> ForegroundLoad
+2026.11.18 11:38:25.869282 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 11:38:25.869295 [ 18305 ] {85d331cf-7a44-42f3-bcc4-1bf9bac5476b} <Debug> MemoryTracker: Query peak memory usage: 3.12 MiB.
+2026.11.18 11:38:25.869303 [ 18305 ] {} <Debug> HTTP-Session-0d391354-94d3-4b3f-bb8b-3a6113e7cfe4: 0d391354-94d3-4b3f-bb8b-3a6113e7cfe4 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.025174 [ 18305 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:41308, User-Agent: clickhouse-js/1.25.0 (lv:nodejs/v24.22.1; os:win32), Content Type: , Transfer Encoding: chunked, X-Forwarded-For: (none)
+2026.11.18 11:38:27.025234 [ 18305 ] {} <Trace> DynamicQueryHandler: Request URI: /?query_id=927bd224-f2d7-412e-849b-193b3b07c4e4&max_execution_time=60
+2026.11.18 11:38:27.025251 [ 18305 ] {} <Debug> HTTP-Session-2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8: Authenticating user 'default' from [::1]:41308
+2026.11.18 11:38:27.025271 [ 18305 ] {} <Debug> HTTP-Session-2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8: 2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.025276 [ 18305 ] {} <Debug> HTTP-Session-2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.025367 [ 18305 ] {} <Trace> HTTP-Session-2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8: 2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 11:38:27.025432 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> HTTPServerRequest: creating in_post id 125106576194912
+2026.11.18 11:38:27.025756 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> executeQuery: (from [::1]:41308) CREATE TABLE `belajar_clickhouse`.`__tmp_ingest_65747919d550` (`id` Nullable(String), `alamat_kantor` Nullable(String), `asal_instansi` Nullable(String), `provinsi_instansi` Nullable(String), `kabkot_instansi` Nullable(String), `tahun` Nullable(String), `judul_diklat` Nullable(String)) ENGINE = MergeTree ORDER BY tuple() SETTINGS auto_statistics_types = '', string_serialization_version = 'single_stream', serialization_info_version = 'basic' (stage: Complete)
+2026.11.18 11:38:27.026558 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:27.026634 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 11:38:27.032423 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Loading data parts
+2026.11.18 11:38:27.032748 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Loaded data parts (0 items) took 0.000 seconds
+2026.11.18 11:38:27.032882 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> AsyncLoader: Prioritize load job 'startup Atomic database belajar_clickhouse': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:27.032884 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> AsyncLoader: Prioritize load job 'startup Ordinary database belajar_clickhouse': BackgrndStartup -> ForegroundLoad
+2026.11.18 11:38:27.036351 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> DatabaseAtomic (belajar_clickhouse): Trying to create a symlink for table belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46), data_path /home/arizal/clickhouse-ext4/.clickhouse/servers/default/data/store/4d5/4d5c5727-a7da-4028-a240-e4845f466c46/, link data/belajar_clickhouse/__tmp_ingest_65747919d550
+2026.11.18 11:38:27.036540 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Information> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Start to refresh statistics
+2026.11.18 11:38:27.036575 [ 18470 ] {BgSchPool::1e9d1978-f274-496c-b20a-6483d01c0f86} <Trace> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Didn't start merge: There are no parts that can be merged. (Collector returned empty ranges set)
+2026.11.18 11:38:27.036599 [ 18316 ] {BgSchPool::7e94ecc3-f63e-49c5-97a3-5f81df29a11e} <Debug> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Refreshing statistics
+2026.11.18 11:38:27.036877 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 11:38:27.036887 [ 18305 ] {927bd224-f2d7-412e-849b-193b3b07c4e4} <Debug> MemoryTracker: Query peak memory usage: 1.00 MiB.
+2026.11.18 11:38:27.036893 [ 18305 ] {} <Debug> HTTP-Session-2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8: 2dcf986b-13eb-4a28-85e1-b11ed8b8d8e8 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.178228 [ 18305 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:41324, User-Agent: (none), Length: 5976524, Content Type: text/csv; charset=utf-8, Transfer Encoding: identity, X-Forwarded-For: (none)
+2026.11.18 11:38:27.178381 [ 18305 ] {} <Trace> DynamicQueryHandler: Request URI: /?query=INSERT+INTO+%60belajar_clickhouse%60.%60__tmp_ingest_65747919d550%60+%28%60id%60%2C+%60alamat_kantor%60%2C+%60asal_instansi%60%2C+%60provinsi_instansi%60%2C+%60kabkot_instansi%60%2C+%60tahun%60%2C+%60judul_diklat%60%29+FORMAT+CSV&format_csv_delimiter=%2C&input_format_csv_skip_first_lines=0&input_format_csv_detect_header=0&format_csv_allow_double_quotes=1&format_csv_allow_single_quotes=0&input_format_allow_errors_num=0&input_format_allow_errors_ratio=0&input_format_csv_allow_variable_number_of_columns=0&input_format_csv_use_default_on_bad_values=0&input_format_csv_empty_as_default=0&format_csv_null_representation=%5CN&input_format_csv_skip_trailing_empty_lines=1&input_format_parallel_parsing=0&async_insert=0&max_threads=1&max_insert_threads=1&max_memory_usage=536870912&max_execution_time=600
+2026.11.18 11:38:27.178409 [ 18305 ] {} <Debug> HTTP-Session-cb945c97-8622-4ec3-a8b0-a4965fd0430d: Authenticating user 'default' from [::1]:41324
+2026.11.18 11:38:27.178436 [ 18305 ] {} <Debug> HTTP-Session-cb945c97-8622-4ec3-a8b0-a4965fd0430d: cb945c97-8622-4ec3-a8b0-a4965fd0430d Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.178443 [ 18305 ] {} <Debug> HTTP-Session-cb945c97-8622-4ec3-a8b0-a4965fd0430d: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 11:38:27.178613 [ 18305 ] {} <Trace> HTTP-Session-cb945c97-8622-4ec3-a8b0-a4965fd0430d: cb945c97-8622-4ec3-a8b0-a4965fd0430d Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 11:38:27.178688 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> HTTPServerRequest: creating in_post id 125106576186176
+2026.11.18 11:38:27.179241 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> executeQuery: (from [::1]:41324) INSERT INTO `belajar_clickhouse`.`__tmp_ingest_65747919d550` (`id`, `alamat_kantor`, `asal_instansi`, `provinsi_instansi`, `kabkot_instansi`, `tahun`, `judul_diklat`) FORMAT CSV  (stage: Complete)
+2026.11.18 11:38:27.179441 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> InsertDependenciesBuilder: deduplicate_blocks : true
+2026.11.18 11:38:27.210158 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Trace> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Trying to reserve 7.59 MiB using storage policy from min volume index 0
+2026.11.18 11:38:27.210181 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Trace> DiskLocal: Reserved 7.59 MiB on local disk `default`, having unreserved 949.18 GiB.
+2026.11.18 11:38:27.210251 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> FakeDiskTransaction: Creating FakeDiskTransaction for disk default
+2026.11.18 11:38:27.274604 [ 18301 ] {} <Trace> BaseDaemon: Received signal 11
+2026.11.18 11:38:27.274719 [ 18301 ] {} <Fatal> BaseDaemon: ########## Short fault info ############
+2026.11.18 11:38:27.274754 [ 18301 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138, architecture: x86_64) (from thread 18305) Received signal 11 (signal sent by pid -239075328 from user 29127)
+2026.11.18 11:38:27.274773 [ 18301 ] {} <Fatal> BaseDaemon: Signal description: Segmentation fault
+2026.11.18 11:38:27.274777 [ 18301 ] {} <Fatal> BaseDaemon: Address: 0x71c7f1c00000. Access: read. Address not mapped to object.
+2026.11.18 11:38:27.274818 [ 18301 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000001245f5d1 0x000000001857d2ac 0x000000001cbfec5e 0x000000001c9a8300 0x000000001cb77763 0x000000001fb86bd0 0x000000001fb86049 0x000000001fddd541 0x000000001fbedce8 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001e9e88c2 0x00000000203db4b7 0x00000000203e39d1 0x000000002051c2f8 0x0000000026628887 0x0000000026628d82 0x00000000265e9d9c 0x00000000265e830f 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+2026.11.18 11:38:27.274821 [ 18301 ] {} <Fatal> BaseDaemon: ########################################
+2026.11.18 11:38:27.274826 [ 18301 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138) (from thread 18305) (query_id: d23cd9eb-af5e-4faa-bc6e-1330f09746eb) (query: INSERT INTO `belajar_clickhouse`.`__tmp_ingest_65747919d550` (`id`, `alamat_kantor`, `asal_instansi`, `provinsi_instansi`, `kabkot_instansi`, `tahun`, `judul_diklat`) FORMAT CSV
+) Received signal Segmentation fault (11)
+2026.11.18 11:38:27.274827 [ 18301 ] {} <Fatal> BaseDaemon: Address: 0x71c7f1c00000. Access: read. Address not mapped to object.
+2026.11.18 11:38:27.274833 [ 18301 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000001245f5d1 0x000000001857d2ac 0x000000001cbfec5e 0x000000001c9a8300 0x000000001cb77763 0x000000001fb86bd0 0x000000001fb86049 0x000000001fddd541 0x000000001fbedce8 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001e9e88c2 0x00000000203db4b7 0x00000000203e39d1 0x000000002051c2f8 0x0000000026628887 0x0000000026628d82 0x00000000265e9d9c 0x00000000265e830f 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+2026.11.18 11:38:27.274971 [ 18301 ] {} <Fatal> BaseDaemon: 2. __llvm_libc::memcpy_ge64_baseline(__llvm_libc::cpp::byte*, __llvm_libc::cpp::byte const*, unsigned long) @ 0x000000001245f5d1
+2026.11.18 11:38:27.275044 [ 18301 ] {} <Fatal> BaseDaemon: 3. DB::WriteBuffer::write(char const*, unsigned long) @ 0x000000001857d2ac
+2026.11.18 11:38:27.275131 [ 18301 ] {} <Fatal> BaseDaemon: 4. DB::SerializationString::serializeBinaryBulk(DB::IColumn const&, DB::WriteBuffer&, unsigned long, unsigned long) const @ 0x000000001cbfec5e
+2026.11.18 11:38:27.275995 [ 18301 ] {} <Fatal> BaseDaemon: 5. DB::ISerialization::serializeBinaryBulkWithMultipleStreams(DB::IColumn const&, unsigned long, unsigned long, DB::ISerialization::SerializeBinaryBulkSettings&, std::shared_ptr<DB::ISerialization::SerializeBinaryBulkState>&) const @ 0x000000001c9a8300
+2026.11.18 11:38:27.276745 [ 18301 ] {} <Fatal> BaseDaemon: 6. DB::SerializationNullable::serializeBinaryBulkWithMultipleStreams(DB::IColumn const&, unsigned long, unsigned long, DB::ISerialization::SerializeBinaryBulkSettings&, std::shared_ptr<DB::ISerialization::SerializeBinaryBulkState>&) const @ 0x000000001cb77763
+2026.11.18 11:38:27.276924 [ 18301 ] {} <Fatal> BaseDaemon: 7. DB::MergeTreeDataPartWriterCompact::writeDataBlockPrimaryIndexAndSkipIndices(DB::Block const&, std::vector<DB::Granule, std::allocator<DB::Granule>> const&) @ 0x000000001fb86bd0
+2026.11.18 11:38:27.283020 [ 18301 ] {} <Fatal> BaseDaemon: 8. DB::MergeTreeDataPartWriterCompact::write(DB::Block const&, DB::PODArray<unsigned long, 4096ul, Allocator<false, false>, 63ul, 64ul> const*, DB::Block*) @ 0x000000001fb86049
+2026.11.18 11:38:27.283050 [ 18301 ] {} <Fatal> BaseDaemon: 9. DB::MergedBlockOutputStream::writeWithPermutation(DB::Block const&, DB::PODArray<unsigned long, 4096ul, Allocator<false, false>, 63ul, 64ul> const*, DB::Block*) @ 0x000000001fddd541
+2026.11.18 11:38:27.283477 [ 18301 ] {} <Fatal> BaseDaemon: 10. DB::MergeTreeDataWriter::writeTempPartImpl(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, String, std::optional<DB::PatchPartIndex>, std::shared_ptr<DB::Context const>, unsigned long, bool) @ 0x000000001fbedce8
+2026.11.18 11:38:27.284450 [ 18301 ] {} <Fatal> BaseDaemon: 11. DB::MergeTreeDataWriter::writeTempPart(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, std::shared_ptr<DB::Context const>, bool) @ 0x000000001fbe95cd
+2026.11.18 11:38:27.284900 [ 18301 ] {} <Fatal> BaseDaemon: 12. DB::MergeTreeSink::writeNewTempPart(DB::BlockWithPartition&) @ 0x000000001fdc41ce
+2026.11.18 11:38:27.284919 [ 18301 ] {} <Fatal> BaseDaemon: 13. DB::MergeTreeSink::consume(DB::Chunk&) @ 0x000000001fdb859b
+2026.11.18 11:38:27.285001 [ 18301 ] {} <Fatal> BaseDaemon: 14. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x0000000020c2ea93
+2026.11.18 11:38:27.285386 [ 18301 ] {} <Fatal> BaseDaemon: 15. void std::__function::__policy_func<void ()>::__call_func[abi:fqe220101]<DB::ExceptionKeepingTransform::work()::$_1>(std::__function::__policy_storage const*) @ 0x0000000020a2838a
+2026.11.18 11:38:27.285456 [ 18301 ] {} <Fatal> BaseDaemon: 16. DB::runStep(std::function<void ()>, std::shared_ptr<DB::ThreadGroup>&) @ 0x0000000020a28200
+2026.11.18 11:38:27.285462 [ 18301 ] {} <Fatal> BaseDaemon: 17. DB::ExceptionKeepingTransform::work() @ 0x0000000020a277c0
+2026.11.18 11:38:27.285467 [ 18301 ] {} <Fatal> BaseDaemon: 18. DB::ExecutionThreadContext::executeTask() @ 0x00000000206da78a
+2026.11.18 11:38:27.285473 [ 18301 ] {} <Fatal> BaseDaemon: 19. DB::PipelineExecutor::executeStepImpl(unsigned long, DB::WorkloadResources&&, std::atomic<bool>*) @ 0x00000000206ca61a
+2026.11.18 11:38:27.285891 [ 18301 ] {} <Fatal> BaseDaemon: 20. DB::PipelineExecutor::executeImpl(unsigned long, bool) @ 0x00000000206c8b09
+2026.11.18 11:38:27.285944 [ 18301 ] {} <Fatal> BaseDaemon: 21. DB::PipelineExecutor::execute(unsigned long, bool) @ 0x00000000206c88d0
+2026.11.18 11:38:27.285951 [ 18301 ] {} <Fatal> BaseDaemon: 22. DB::CompletedPipelineExecutor::execute() @ 0x00000000206bf90a
+2026.11.18 11:38:27.286355 [ 18301 ] {} <Fatal> BaseDaemon: 23. DB::executeQuery(std::unique_ptr<DB::ReadBuffer, std::default_delete<DB::ReadBuffer>>, DB::WriteBuffer&, std::shared_ptr<DB::Context>, std::function<void (DB::QueryResultDetails const&)>, DB::QueryFlags, std::optional<DB::FormatSettings> const&, std::function<void (DB::IOutputFormat&, String const&, std::shared_ptr<DB::Context const> const&, std::optional<DB::FormatSettings> const&)>, std::function<void ()>, std::function<void ()>) @ 0x000000001e9e88c2
+2026.11.18 11:38:27.286417 [ 18301 ] {} <Fatal> BaseDaemon: 24. DB::HTTPHandler::processQuery(DB::HTTPServerRequest&, DB::HTMLForm&, DB::HTTPServerResponse&, DB::HTTPHandler::Output&, DB::QueryScope&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000203db4b7
+2026.11.18 11:38:27.286424 [ 18301 ] {} <Fatal> BaseDaemon: 25. DB::HTTPHandler::handleRequest(DB::HTTPServerRequest&, DB::HTTPServerResponse&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000203e39d1
+2026.11.18 11:38:27.286433 [ 18301 ] {} <Fatal> BaseDaemon: 26. DB::HTTPServerConnection::run() @ 0x000000002051c2f8
+2026.11.18 11:38:27.286472 [ 18301 ] {} <Fatal> BaseDaemon: 27. Poco::Net::TCPServerConnection::start() @ 0x0000000026628887
+2026.11.18 11:38:27.286477 [ 18301 ] {} <Fatal> BaseDaemon: 28. Poco::Net::TCPServerDispatcher::run() @ 0x0000000026628d82
+2026.11.18 11:38:27.286509 [ 18301 ] {} <Fatal> BaseDaemon: 29. Poco::PooledThread::run() @ 0x00000000265e9d9c
+2026.11.18 11:38:27.286548 [ 18301 ] {} <Fatal> BaseDaemon: 30. Poco::ThreadImpl::runnableEntry(void*) @ 0x00000000265e830f
+2026.11.18 11:38:27.286570 [ 18301 ] {} <Fatal> BaseDaemon: 31. ? @ 0x00000000000949e3
+2026.11.18 11:38:27.286573 [ 18301 ] {} <Fatal> BaseDaemon: 32. ? @ 0x0000000000126860
+2026.11.18 11:38:27.603370 [ 18301 ] {} <Fatal> BaseDaemon: Integrity check of the executable successfully passed (checksum: 6BBE614FC9BF5AF748E98999A3FA33D6)
+2026.11.18 11:38:27.603380 [ 18301 ] {} <Information> CrashWriter: Sending crash report
+2026.11.18 11:38:29.731438 [ 18301 ] {} <Trace> WriteBufferToHTTP: Sending request to https://crash.clickhouse.com/
+2026.11.18 11:38:30.592429 [ 18301 ] {} <Fatal> BaseDaemon: ClickHouse version 26.10.1.428 is old and should be upgraded to the latest version.
+2026.11.18 11:38:30.595917 [ 18301 ] {} <Fatal> BaseDaemon: Changed settings: max_insert_threads = 1, max_threads = 1, max_execution_time = 600., max_memory_usage = 536870912, async_insert = false, input_format_parallel_parsing = false, input_format_csv_empty_as_default = false, input_format_csv_detect_header = false, input_format_csv_skip_trailing_empty_lines = true
+arizal@DESKTOP-DN8657N:~/clickhouse-ext4$ grep -n -B 5 -A 20 -E "Fatal|Logical error|Assertion|BaseDaemon|signal 6|Terminate called" ~/clickhouse-ext4/.clickhouse/servers/default/server.log | tail -n 80
+4733-2026.11.18 11:38:27.179241 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> executeQuery: (from [::1]:41324) INSERT INTO `belajar_clickhouse`.`__tmp_ingest_65747919d550` (`id`, `alamat_kantor`, `asal_instansi`, `provinsi_instansi`, `kabkot_instansi`, `tahun`, `judul_diklat`) FORMAT CSV  (stage: Complete)
+4734-2026.11.18 11:38:27.179441 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> InsertDependenciesBuilder: deduplicate_blocks : true
+4735-2026.11.18 11:38:27.210158 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Trace> belajar_clickhouse.__tmp_ingest_65747919d550 (4d5c5727-a7da-4028-a240-e4845f466c46): Trying to reserve 7.59 MiB using storage policy from min volume index 0
+4736-2026.11.18 11:38:27.210181 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Trace> DiskLocal: Reserved 7.59 MiB on local disk `default`, having unreserved 949.18 GiB.
+4737-2026.11.18 11:38:27.210251 [ 18305 ] {d23cd9eb-af5e-4faa-bc6e-1330f09746eb} <Debug> FakeDiskTransaction: Creating FakeDiskTransaction for disk default
+4738:2026.11.18 11:38:27.274604 [ 18301 ] {} <Trace> BaseDaemon: Received signal 11
+4739:2026.11.18 11:38:27.274719 [ 18301 ] {} <Fatal> BaseDaemon: ########## Short fault info ############
+4740:2026.11.18 11:38:27.274754 [ 18301 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138, architecture: x86_64) (from thread 18305) Received signal 11 (signal sent by pid -239075328 from user 29127)
+4741:2026.11.18 11:38:27.274773 [ 18301 ] {} <Fatal> BaseDaemon: Signal description: Segmentation fault
+4742:2026.11.18 11:38:27.274777 [ 18301 ] {} <Fatal> BaseDaemon: Address: 0x71c7f1c00000. Access: read. Address not mapped to object.
+4743:2026.11.18 11:38:27.274818 [ 18301 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000001245f5d1 0x000000001857d2ac 0x000000001cbfec5e 0x000000001c9a8300 0x000000001cb77763 0x000000001fb86bd0 0x000000001fb86049 0x000000001fddd541 0x000000001fbedce8 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001e9e88c2 0x00000000203db4b7 0x00000000203e39d1 0x000000002051c2f8 0x0000000026628887 0x0000000026628d82 0x00000000265e9d9c 0x00000000265e830f 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+4744:2026.11.18 11:38:27.274821 [ 18301 ] {} <Fatal> BaseDaemon: ########################################
+4745:2026.11.18 11:38:27.274826 [ 18301 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138) (from thread 18305) (query_id: d23cd9eb-af5e-4faa-bc6e-1330f09746eb) (query: INSERT INTO `belajar_clickhouse`.`__tmp_ingest_65747919d550` (`id`, `alamat_kantor`, `asal_instansi`, `provinsi_instansi`, `kabkot_instansi`, `tahun`, `judul_diklat`) FORMAT CSV
+4746-) Received signal Segmentation fault (11)
+4747:2026.11.18 11:38:27.274827 [ 18301 ] {} <Fatal> BaseDaemon: Address: 0x71c7f1c00000. Access: read. Address not mapped to object.
+4748:2026.11.18 11:38:27.274833 [ 18301 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000001245f5d1 0x000000001857d2ac 0x000000001cbfec5e 0x000000001c9a8300 0x000000001cb77763 0x000000001fb86bd0 0x000000001fb86049 0x000000001fddd541 0x000000001fbedce8 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001e9e88c2 0x00000000203db4b7 0x00000000203e39d1 0x000000002051c2f8 0x0000000026628887 0x0000000026628d82 0x00000000265e9d9c 0x00000000265e830f 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+4749:2026.11.18 11:38:27.274971 [ 18301 ] {} <Fatal> BaseDaemon: 2. __llvm_libc::memcpy_ge64_baseline(__llvm_libc::cpp::byte*, __llvm_libc::cpp::byte const*, unsigned long) @ 0x000000001245f5d1
+4750:2026.11.18 11:38:27.275044 [ 18301 ] {} <Fatal> BaseDaemon: 3. DB::WriteBuffer::write(char const*, unsigned long) @ 0x000000001857d2ac
+4751:2026.11.18 11:38:27.275131 [ 18301 ] {} <Fatal> BaseDaemon: 4. DB::SerializationString::serializeBinaryBulk(DB::IColumn const&, DB::WriteBuffer&, unsigned long, unsigned long) const @ 0x000000001cbfec5e
+4752:2026.11.18 11:38:27.275995 [ 18301 ] {} <Fatal> BaseDaemon: 5. DB::ISerialization::serializeBinaryBulkWithMultipleStreams(DB::IColumn const&, unsigned long, unsigned long, DB::ISerialization::SerializeBinaryBulkSettings&, std::shared_ptr<DB::ISerialization::SerializeBinaryBulkState>&) const @ 0x000000001c9a8300
+4753:2026.11.18 11:38:27.276745 [ 18301 ] {} <Fatal> BaseDaemon: 6. DB::SerializationNullable::serializeBinaryBulkWithMultipleStreams(DB::IColumn const&, unsigned long, unsigned long, DB::ISerialization::SerializeBinaryBulkSettings&, std::shared_ptr<DB::ISerialization::SerializeBinaryBulkState>&) const @ 0x000000001cb77763
+4754:2026.11.18 11:38:27.276924 [ 18301 ] {} <Fatal> BaseDaemon: 7. DB::MergeTreeDataPartWriterCompact::writeDataBlockPrimaryIndexAndSkipIndices(DB::Block const&, std::vector<DB::Granule, std::allocator<DB::Granule>> const&) @ 0x000000001fb86bd0
+4755:2026.11.18 11:38:27.283020 [ 18301 ] {} <Fatal> BaseDaemon: 8. DB::MergeTreeDataPartWriterCompact::write(DB::Block const&, DB::PODArray<unsigned long, 4096ul, Allocator<false, false>, 63ul, 64ul> const*, DB::Block*) @ 0x000000001fb86049
+4756:2026.11.18 11:38:27.283050 [ 18301 ] {} <Fatal> BaseDaemon: 9. DB::MergedBlockOutputStream::writeWithPermutation(DB::Block const&, DB::PODArray<unsigned long, 4096ul, Allocator<false, false>, 63ul, 64ul> const*, DB::Block*) @ 0x000000001fddd541
+4757:2026.11.18 11:38:27.283477 [ 18301 ] {} <Fatal> BaseDaemon: 10. DB::MergeTreeDataWriter::writeTempPartImpl(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, String, std::optional<DB::PatchPartIndex>, std::shared_ptr<DB::Context const>, unsigned long, bool) @ 0x000000001fbedce8
+4758:2026.11.18 11:38:27.284450 [ 18301 ] {} <Fatal> BaseDaemon: 11. DB::MergeTreeDataWriter::writeTempPart(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, std::shared_ptr<DB::Context const>, bool) @ 0x000000001fbe95cd
+4759:2026.11.18 11:38:27.284900 [ 18301 ] {} <Fatal> BaseDaemon: 12. DB::MergeTreeSink::writeNewTempPart(DB::BlockWithPartition&) @ 0x000000001fdc41ce
+4760:2026.11.18 11:38:27.284919 [ 18301 ] {} <Fatal> BaseDaemon: 13. DB::MergeTreeSink::consume(DB::Chunk&) @ 0x000000001fdb859b
+4761:2026.11.18 11:38:27.285001 [ 18301 ] {} <Fatal> BaseDaemon: 14. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x0000000020c2ea93
+4762:2026.11.18 11:38:27.285386 [ 18301 ] {} <Fatal> BaseDaemon: 15. void std::__function::__policy_func<void ()>::__call_func[abi:fqe220101]<DB::ExceptionKeepingTransform::work()::$_1>(std::__function::__policy_storage const*) @ 0x0000000020a2838a
+4763:2026.11.18 11:38:27.285456 [ 18301 ] {} <Fatal> BaseDaemon: 16. DB::runStep(std::function<void ()>, std::shared_ptr<DB::ThreadGroup>&) @ 0x0000000020a28200
+4764:2026.11.18 11:38:27.285462 [ 18301 ] {} <Fatal> BaseDaemon: 17. DB::ExceptionKeepingTransform::work() @ 0x0000000020a277c0
+4765:2026.11.18 11:38:27.285467 [ 18301 ] {} <Fatal> BaseDaemon: 18. DB::ExecutionThreadContext::executeTask() @ 0x00000000206da78a
+4766:2026.11.18 11:38:27.285473 [ 18301 ] {} <Fatal> BaseDaemon: 19. DB::PipelineExecutor::executeStepImpl(unsigned long, DB::WorkloadResources&&, std::atomic<bool>*) @ 0x00000000206ca61a
+4767:2026.11.18 11:38:27.285891 [ 18301 ] {} <Fatal> BaseDaemon: 20. DB::PipelineExecutor::executeImpl(unsigned long, bool) @ 0x00000000206c8b09
+4768:2026.11.18 11:38:27.285944 [ 18301 ] {} <Fatal> BaseDaemon: 21. DB::PipelineExecutor::execute(unsigned long, bool) @ 0x00000000206c88d0
+4769:2026.11.18 11:38:27.285951 [ 18301 ] {} <Fatal> BaseDaemon: 22. DB::CompletedPipelineExecutor::execute() @ 0x00000000206bf90a
+4770:2026.11.18 11:38:27.286355 [ 18301 ] {} <Fatal> BaseDaemon: 23. DB::executeQuery(std::unique_ptr<DB::ReadBuffer, std::default_delete<DB::ReadBuffer>>, DB::WriteBuffer&, std::shared_ptr<DB::Context>, std::function<void (DB::QueryResultDetails const&)>, DB::QueryFlags, std::optional<DB::FormatSettings> const&, std::function<void (DB::IOutputFormat&, String const&, std::shared_ptr<DB::Context const> const&, std::optional<DB::FormatSettings> const&)>, std::function<void ()>, std::function<void ()>) @ 0x000000001e9e88c2
+4771:2026.11.18 11:38:27.286417 [ 18301 ] {} <Fatal> BaseDaemon: 24. DB::HTTPHandler::processQuery(DB::HTTPServerRequest&, DB::HTMLForm&, DB::HTTPServerResponse&, DB::HTTPHandler::Output&, DB::QueryScope&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000203db4b7
+4772:2026.11.18 11:38:27.286424 [ 18301 ] {} <Fatal> BaseDaemon: 25. DB::HTTPHandler::handleRequest(DB::HTTPServerRequest&, DB::HTTPServerResponse&, StrongTypedef<unsigned long, ProfileEvents::EventTag> const&) @ 0x00000000203e39d1
+4773:2026.11.18 11:38:27.286433 [ 18301 ] {} <Fatal> BaseDaemon: 26. DB::HTTPServerConnection::run() @ 0x000000002051c2f8
+4774:2026.11.18 11:38:27.286472 [ 18301 ] {} <Fatal> BaseDaemon: 27. Poco::Net::TCPServerConnection::start() @ 0x0000000026628887
+4775:2026.11.18 11:38:27.286477 [ 18301 ] {} <Fatal> BaseDaemon: 28. Poco::Net::TCPServerDispatcher::run() @ 0x0000000026628d82
+4776:2026.11.18 11:38:27.286509 [ 18301 ] {} <Fatal> BaseDaemon: 29. Poco::PooledThread::run() @ 0x00000000265e9d9c
+4777:2026.11.18 11:38:27.286548 [ 18301 ] {} <Fatal> BaseDaemon: 30. Poco::ThreadImpl::runnableEntry(void*) @ 0x00000000265e830f
+4778:2026.11.18 11:38:27.286570 [ 18301 ] {} <Fatal> BaseDaemon: 31. ? @ 0x00000000000949e3
+4779:2026.11.18 11:38:27.286573 [ 18301 ] {} <Fatal> BaseDaemon: 32. ? @ 0x0000000000126860
+4780:2026.11.18 11:38:27.603370 [ 18301 ] {} <Fatal> BaseDaemon: Integrity check of the executable successfully passed (checksum: 6BBE614FC9BF5AF748E98999A3FA33D6)
+4781-2026.11.18 11:38:27.603380 [ 18301 ] {} <Information> CrashWriter: Sending crash report
+4782-2026.11.18 11:38:29.731438 [ 18301 ] {} <Trace> WriteBufferToHTTP: Sending request to https://crash.clickhouse.com/
+4783:2026.11.18 11:38:30.592429 [ 18301 ] {} <Fatal> BaseDaemon: ClickHouse version 26.10.1.428 is old and should be upgraded to the latest version.
+4784:2026.11.18 11:38:30.595917 [ 18301 ] {} <Fatal> BaseDaemon: Changed settings: max_insert_threads = 1, max_threads = 1, max_execution_time = 600., max_memory_usage = 536870912, async_insert = false, input_format_parallel_parsing = false, input_format_csv_empty_as_default = false, input_format_csv_detect_header = false, input_format_csv_skip_trailing_empty_lines = true
+arizal@DESKTOP-DN8657N:~/clickhouse-ext4$ sudo dmesg -T | grep -i -E "oom|killed|clickhouse|segfault|signal" | tail -n 15
+free -h && df -h ~/clickhouse-ext4
+[sudo] password for arizal:
+[Wed Nov 18 08:56:19 2026] clickhouse: QueryPipelineEx: potentially unexpected fatal signal 6.
+[Wed Nov 18 08:56:19 2026] WSL (3122 - CaptureCrash): Capturing crash for pid: 2694, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 09:02:36 2026] clickhouse: QueryPipelineEx: potentially unexpected fatal signal 6.
+[Wed Nov 18 09:02:36 2026] WSL (3485 - CaptureCrash): Capturing crash for pid: 2971, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 09:12:15 2026] clickhouse: QueryPipelineEx: potentially unexpected fatal signal 6.
+[Wed Nov 18 09:12:15 2026] WSL (3850 - CaptureCrash): Capturing crash for pid: 3366, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 09:25:36 2026] clickhouse: AsyncInsertQue: potentially unexpected fatal signal 6.
+[Wed Nov 18 09:25:36 2026] WSL (4330 - CaptureCrash): Capturing crash for pid: 3725, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 09:44:50 2026] clickhouse: AsyncInsertQue: potentially unexpected fatal signal 6.
+[Wed Nov 18 09:44:50 2026] WSL (4856 - CaptureCrash): Capturing crash for pid: 4093, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 11:33:15 2026] clickhouse: clickhouse: potentially unexpected fatal signal 6.
+[Wed Nov 18 11:33:15 2026] CPU: 6 UID: 1000 PID: 18336 Comm: clickhouse Not tainted 6.18.58.1-microsoft-standard-WSL2 #1 PREEMPT(none)
+[Wed Nov 18 11:33:15 2026] WSL (19073 - CaptureCrash): Capturing crash for pid: 17548, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 6, port: 50005
+[Wed Nov 18 11:38:33 2026] clickhouse: HTTPHandler: potentially unexpected fatal signal 11.
+[Wed Nov 18 11:38:33 2026] WSL (25571 - CaptureCrash): Capturing crash for pid: 18297, executable: !home!arizal!.clickhouse!versions!26.10.1.428!clickhouse, signal: 11, port: 50005
+               total        used        free      shared  buff/cache   available
+Mem:           7.6Gi       189Mi       7.3Gi       3.0Mi       138Mi       7.3Gi
+Swap:          2.0Gi          0B       2.0Gi
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sdd       1007G  6.5G  950G   1% /
+arizal@DESKTOP-DN8657N:~/clickhouse-ext4$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

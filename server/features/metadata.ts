@@ -165,8 +165,6 @@ export async function createMergeTreeTableSafe(
   maxExecutionTimeSec = 60,
 ): Promise<void> {
   const settingsCandidates = [
-    " SETTINGS auto_statistics_types = '', string_serialization_version = 'single_stream', serialization_info_version = 'basic'",
-    " SETTINGS auto_statistics_types = '', string_serialization_version = 'single_stream'",
     " SETTINGS auto_statistics_types = ''",
     '',
   ]
@@ -186,8 +184,6 @@ export async function createMergeTreeTableSafe(
       const isSettingErr = msg.includes('unknown_setting')
         || msg.includes('unknown setting')
         || msg.includes('auto_statistics_types')
-        || msg.includes('string_serialization_version')
-        || msg.includes('serialization_info_version')
       if (!isSettingErr || i === settingsCandidates.length - 1) {
         throw err
       }
