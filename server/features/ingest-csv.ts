@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
+import http from 'node:http'
+import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -12,8 +14,8 @@ import { validateDatabase } from './metadata'
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_COLUMNS = 200
 export const PREVIEW_ROW_LIMIT = 20
-export const BATCH_MAX_BYTES = 4 * 1024 * 1024
-export const BATCH_MAX_ROWS = 20_000
+export const BATCH_MAX_BYTES = 2 * 1024 * 1024
+export const BATCH_MAX_ROWS = 10_000
 export const STREAM_CHUNK_BYTES = 64 * 1024
 const STAGED_UPLOAD_TTL_MS = 30 * 60 * 1000
 
@@ -1283,6 +1285,127 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
   }
 }
 
+export async function insertCsvBatchHttp(params: {
+  clickhouseUrl: string
+  clickhouseUser: string
+  clickhousePassword: string
+  table: string
+  columns: string[]
+  batchBuffer: Buffer
+  clickhouseSettings: Record<string, string | number>
+  timeoutMs?: number
+}): Promise<void> {
+  const url = new URL(params.clickhouseUrl.trim())
+  const username = params.clickhouseUser || (url.username ? decodeURIComponent(url.username) : 'default')
+  const password = params.clickhousePassword || (url.password ? decodeURIComponent(url.password) : '')
+  url.username = ''
+  url.password = ''
+
+  const insertSql = `INSERT INTO ${params.table} (${params.columns.join(', ')}) FORMAT CSV`
+  url.searchParams.set('query', insertSql)
+  for (const [key, val] of Object.entries(params.clickhouseSettings)) {
+    url.searchParams.set(key, String(val))
+  }
+
+  const isHttps = url.protocol === 'https:'
+  const transport = isHttps ? https : http
+  const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+
+  const sendOnce = (forceIpv4: boolean) => new Promise<void>((resolve, reject) => {
+    let settled = false
+    let responseStarted = false
+
+    const finishError = (err: Error) => {
+      if (settled) return
+      settled = true
+      reject(err)
+    }
+
+    const finishSuccess = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+
+    const req = transport.request(url, {
+      method: 'POST',
+      agent: false,
+      timeout: params.timeoutMs ?? 600_000,
+      ...(forceIpv4 ? { family: 4 } : {}),
+      headers: {
+        Authorization: authHeader,
+        Connection: 'close',
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Length': String(params.batchBuffer.length),
+      },
+    }, (res) => {
+      responseStarted = true
+      const chunks: Buffer[] = []
+      res.on('data', (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      })
+      res.on('end', () => {
+        const bodyText = Buffer.concat(chunks).toString('utf8').trim()
+        const statusCode = res.statusCode ?? 500
+        const hasException = res.headers['x-clickhouse-exception-code'] !== undefined
+        if (statusCode >= 400 || hasException) {
+          finishError(new Error(bodyText || `ClickHouse HTTP ${statusCode}`))
+          return
+        }
+        finishSuccess()
+      })
+      res.on('close', () => {
+        if (settled) return
+        const partial = Buffer.concat(chunks).toString('utf8').trim()
+        const statusCode = res.statusCode ?? 500
+        if (statusCode >= 400 || partial) {
+          finishError(new Error(partial || `ClickHouse HTTP ${statusCode}`))
+        }
+      })
+      res.on('error', (err) => {
+        const partial = Buffer.concat(chunks).toString('utf8').trim()
+        finishError(partial ? new Error(partial) : err)
+      })
+    })
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Timeout error saat mengirim batch CSV ke ClickHouse.'))
+    })
+
+    req.on('error', (err: NodeJS.ErrnoException) => {
+      // Give the response stream a moment if ClickHouse sent an error body right before closing the socket
+      if (responseStarted) {
+        setTimeout(() => {
+          if (!settled) {
+            const detail = err.code ? `${err.message} (${err.code}${err.syscall ? `:${err.syscall}` : ''})` : err.message
+            finishError(new Error(detail))
+          }
+        }, 50)
+        return
+      }
+      const detail = err.code ? `${err.message} (${err.code}${err.syscall ? `:${err.syscall}` : ''})` : err.message
+      finishError(new Error(detail))
+    })
+
+    req.end(params.batchBuffer)
+  })
+
+  try {
+    await sendOnce(false)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.toLowerCase() : ''
+    if (
+      url.hostname.toLowerCase() === 'localhost'
+      && (msg.includes('econnreset') || msg.includes('socket hang up') || msg.includes('econnrefused'))
+      && !msg.includes('db::exception')
+    ) {
+      await sendOnce(true)
+      return
+    }
+    throw err
+  }
+}
+
 export function sanitizeIngestErrorMessage(error: unknown, fallback: string): string {
   if (isHttpError(error)) {
     return error.message
@@ -1294,10 +1417,10 @@ export function sanitizeIngestErrorMessage(error: unknown, fallback: string): st
       return `${fallback} Penyebab: Waktu eksekusi habis (timeout) saat memproses data.`
     }
     if (lower.includes('socket hang up') || lower.includes('econnreset')) {
-      return `${fallback} Penyebab: Koneksi ke ClickHouse terputus (socket hang up / ECONNRESET). Pastikan layanan ClickHouse aktif dan tidak kehabisan memori.`
+      return `${fallback} Penyebab: Koneksi ke ClickHouse terputus (${raw}). Pastikan layanan ClickHouse aktif dan tidak kehabisan memori.`
     }
     if (lower.includes('econnrefused')) {
-      return `${fallback} Penyebab: Tidak dapat terhubung ke server ClickHouse (koneksi ditolak).`
+      return `${fallback} Penyebab: Tidak dapat terhubung ke server ClickHouse (${raw}).`
     }
     const cleanMsg = raw.replace(/^DB::Exception:\s*/i, '').split('\n')[0]?.trim() || raw
     return `${fallback} Detail: ${cleanMsg}`
