@@ -18,7 +18,7 @@ import {
   validateNewTableName,
   validateTargetColumns,
 } from '../../features/ingest-csv'
-import { quoteIdentifier } from '../../features/metadata'
+import { createMergeTreeTableSafe, quoteIdentifier } from '../../features/metadata'
 
 async function checkClickHouseAlive(
   client: ReturnType<typeof useClickHouse>,
@@ -114,10 +114,11 @@ export default defineEventHandler(async (event) => {
       .join(', ')
 
     currentStage = 'buat_tabel_sementara'
-    await client.command({
-      query: `CREATE TABLE ${quotedDb}.${quotedStagingTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
-      clickhouse_settings: { max_execution_time: 60 },
-    })
+    await createMergeTreeTableSafe(
+      client,
+      `CREATE TABLE ${quotedDb}.${quotedStagingTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
+      60,
+    )
     createdStagingTable = true
 
     const csvInsertSettings = {
@@ -134,6 +135,7 @@ export default defineEventHandler(async (event) => {
       format_csv_null_representation: '\\N',
       input_format_csv_skip_trailing_empty_lines: 1,
       input_format_parallel_parsing: 0,
+      async_insert: 0,
       max_threads: 1,
       max_insert_threads: 1,
       max_memory_usage: 536870912,

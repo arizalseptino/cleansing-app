@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { useClickHouse } from '../utils/clickhouse'
-import { quoteIdentifier } from './metadata'
+import { createMergeTreeTableSafe, quoteIdentifier } from './metadata'
 
 const historyDatabase = 'bersihdata'
 const historyTable = 'riwayat_cleansing'
@@ -33,8 +33,9 @@ export async function ensureCleansingHistoryTable(
     query: `CREATE DATABASE IF NOT EXISTS ${database}`,
     clickhouse_settings: { max_execution_time: 30 },
   })
-  await client.command({
-    query: `
+  await createMergeTreeTableSafe(
+    client,
+    `
       CREATE TABLE IF NOT EXISTS ${table} (
         ${quoteIdentifier('id')} UUID,
         ${quoteIdentifier('waktu_mulai')} DateTime,
@@ -53,8 +54,8 @@ export async function ensureCleansingHistoryTable(
       ENGINE = MergeTree
       ORDER BY ${quoteIdentifier('waktu_mulai')}
     `,
-    clickhouse_settings: { max_execution_time: 30 },
-  })
+    30,
+  )
 }
 
 function jsonParameters(parameters: Record<string, unknown>): string {

@@ -2081,8 +2081,9 @@ export class MockClickHouseClient {
       })
 
       const after = trimmed.slice(closeParen + 1)
-      const engineMatch = /ENGINE\s*=?\s*([A-Za-z0-9_]+)/i.exec(after)
-      const orderMatch = /ORDER\s+BY\s+(.+)$/i.exec(after)
+      const afterNoSettings = after.replace(/\s+SETTINGS\s+[\s\S]*$/i, '')
+      const engineMatch = /ENGINE\s*=?\s*([A-Za-z0-9_]+)/i.exec(afterNoSettings)
+      const orderMatch = /ORDER\s+BY\s+(.+)$/i.exec(afterNoSettings)
       const engine = engineMatch?.[1] ?? 'MergeTree'
       const sorting_key = orderMatch?.[1]?.replace(/`/g, '').trim() ?? 'tuple()'
 

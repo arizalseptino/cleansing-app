@@ -158,3 +158,26 @@ export function quoteSortingKey(sortingKey: string, columns: ColumnMetadata[]): 
 
   return { expression, columns: keyColumns }
 }
+
+export async function createMergeTreeTableSafe(
+  client: ReturnType<typeof useClickHouse>,
+  createSqlBase: string,
+  maxExecutionTimeSec = 60,
+): Promise<void> {
+  try {
+    await client.command({
+      query: `${createSqlBase} SETTINGS auto_statistics_types = ''`,
+      clickhouse_settings: { max_execution_time: maxExecutionTimeSec },
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.toLowerCase() : ''
+    if (msg.includes('auto_statistics_types') || msg.includes('unknown_setting')) {
+      await client.command({
+        query: createSqlBase,
+        clickhouse_settings: { max_execution_time: maxExecutionTimeSec },
+      })
+      return
+    }
+    throw err
+  }
+}

@@ -1,0 +1,130 @@
+arizal@DESKTOP-DN8657N:/mnt/c/WINDOWS/system32$ tail -n 120 /mnt/c/WINDOWS/system32/.clickhouse/servers/default/server.log
+2026.11.18 09:44:42.034245 [ 4314 ] {BgSchPool::6e0d6c2a-c56a-4b85-bce4-fac385741c52} <Trace> uji_bersihdata.sipka_peserta_202610050925_uji (399a8291-52d7-43b5-b8d5-878ec3800e27): Didn't start merge: There are no parts that can be merged. (Collector returned empty ranges set) (skipped 4 similar messages)
+2026.11.18 09:44:42.276383 [ 4263 ] {BgSchPool::2e0707c5-00b3-4388-b1ce-05ae5e5f855c} <Trace> sibangkom.v_sibangkom_peserta (a2c8a0ab-6aac-47ce-9365-f1c422429315): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:42.483910 [ 4284 ] {BgSchPool::e25b949a-56d3-4363-932a-8ee924e5b486} <Trace> uji_bersihdata.uji_header (a14114d4-2a98-448f-b675-52f9fb4126c6): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:42.513253 [ 4309 ] {BgSchPool::5095538c-bb67-48ff-931a-607adb7fc57e} <Trace> db_sipka_peserta.sipka_peserta_cleaned (7a281ef1-f962-4619-b50e-a8075a70a1b4): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:42.602132 [ 4258 ] {BgSchPool::63032129-e769-4f4c-814e-583815728d1f} <Trace> db_sipka_peserta.master_kabkot (47ee5ede-5f47-43a5-bace-23db8c86f78d): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:42.606605 [ 4114 ] {BgSchPool::ab284668-7677-4961-aefd-6eeb2f2d4ca2} <Trace> db_sipka_bangkom_2015.sipka_peserta_cleaned_first_100000_source_ids_133233_190230 (ae73b161-563d-470d-8801-2aefc6974bd6): Didn't start merge: There are no parts that can be merged. (Collector returned empty ranges set) (skipped 4 similar messages)
+2026.11.18 09:44:42.668187 [ 4107 ] {BgSchPool::9dad206c-9344-4168-8936-9057ef7f88cf} <Trace> db_sipka_bangkom_2015.uji_sipka_peserta_cleaned (a0d16232-4d55-4ee4-a91c-6d66c599bf3a): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:42.860044 [ 4120 ] {BgSchPool::b0a9d43b-df67-49cc-860a-c89d4571a71b} <Trace> belajar_clickhouse.dummy_aggregating (1674792c-6086-439e-a599-f3b16f40fbbf): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:44.780283 [ 4118 ] {BgSchPool::b700ebd1-9890-4f1e-8a0d-5f9f7a4e6796} <Trace> db_sipka_bangkom_2015.sipka_peserta_cleaned (57870f9b-cc96-4d2a-9cac-c568c8ed03de): Didn't start merge: There is no need to merge parts according to merge selector algorithm (skipped 4 similar messages)
+2026.11.18 09:44:46.957605 [ 4103 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:40974, User-Agent: clickhouse-js/1.25.0 (lv:nodejs/v24.22.1; os:win32), Content Type: , Transfer Encoding: chunked, X-Forwarded-For: (none)
+2026.11.18 09:44:46.957752 [ 4103 ] {} <Trace> DynamicQueryHandler: Request URI: /?query_id=b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f&param_database=uji_bersihdata&readonly=1&max_execution_time=15&default_format=JSONEachRow
+2026.11.18 09:44:46.957800 [ 4103 ] {} <Debug> HTTP-Session-1edd9f30-7764-4456-8f0e-5e8ed99358a7: Authenticating user 'default' from [::1]:40974
+2026.11.18 09:44:46.957852 [ 4103 ] {} <Debug> HTTP-Session-1edd9f30-7764-4456-8f0e-5e8ed99358a7: 1edd9f30-7764-4456-8f0e-5e8ed99358a7 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:46.957859 [ 4103 ] {} <Debug> HTTP-Session-1edd9f30-7764-4456-8f0e-5e8ed99358a7: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:46.958041 [ 4103 ] {} <Trace> HTTP-Session-1edd9f30-7764-4456-8f0e-5e8ed99358a7: 1edd9f30-7764-4456-8f0e-5e8ed99358a7 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 09:44:46.958169 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> HTTPServerRequest: creating in_post id 138062565700592
+2026.11.18 09:44:46.958433 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> executeQuery: (from [::1]:40974) SELECT name FROM system.databases WHERE name = 'uji_bersihdata' LIMIT 1 (stage: Complete)
+2026.11.18 09:44:46.959012 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Trace> Planner: Query to stage Complete
+2026.11.18 09:44:46.959068 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:46.959122 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Trace> Planner: Query from stage FetchColumns to stage Complete
+2026.11.18 09:44:46.959245 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:46.960867 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> executeQuery: Read 1 rows, 22.00 B in 0.003 sec., 378.644 rows/sec., 8.13 KiB/sec.
+2026.11.18 09:44:46.961238 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 09:44:46.961257 [ 4103 ] {b8f6f26b-e0ec-4bf5-8c9c-aff99fe2591f} <Debug> MemoryTracker: Query peak memory usage: 4.10 MiB.
+2026.11.18 09:44:46.961269 [ 4103 ] {} <Debug> HTTP-Session-1edd9f30-7764-4456-8f0e-5e8ed99358a7: 1edd9f30-7764-4456-8f0e-5e8ed99358a7 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:46.969348 [ 4103 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:40984, User-Agent: clickhouse-js/1.25.0 (lv:nodejs/v24.22.1; os:win32), Content Type: , Transfer Encoding: chunked, X-Forwarded-For: (none)
+2026.11.18 09:44:46.969415 [ 4103 ] {} <Trace> DynamicQueryHandler: Request URI: /?query_id=edc99d02-fd9a-4820-8848-88d901c8e7f8&param_database=uji_bersihdata&param_table=kecil50k_uji2&readonly=1&max_execution_time=15&default_format=JSONEachRow
+2026.11.18 09:44:46.969433 [ 4103 ] {} <Debug> HTTP-Session-f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3: Authenticating user 'default' from [::1]:40984
+2026.11.18 09:44:46.969453 [ 4103 ] {} <Debug> HTTP-Session-f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3: f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:46.969457 [ 4103 ] {} <Debug> HTTP-Session-f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:46.969525 [ 4103 ] {} <Trace> HTTP-Session-f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3: f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 09:44:46.969578 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> HTTPServerRequest: creating in_post id 138062565701488
+2026.11.18 09:44:46.969777 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> executeQuery: (from [::1]:40984) SELECT name FROM system.tables WHERE (database = 'uji_bersihdata') AND (name = 'kecil50k_uji2') LIMIT 1 (stage: Complete)
+2026.11.18 09:44:46.970289 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Trace> Planner: Query to stage Complete
+2026.11.18 09:44:46.970343 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:46.970414 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Trace> Planner: Query from stage FetchColumns to stage Complete
+2026.11.18 09:44:46.970531 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:46.972099 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 09:44:46.972112 [ 4103 ] {edc99d02-fd9a-4820-8848-88d901c8e7f8} <Debug> MemoryTracker: Query peak memory usage: 3.12 MiB.
+2026.11.18 09:44:46.972118 [ 4103 ] {} <Debug> HTTP-Session-f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3: f4b7fedb-2e4e-4f69-b804-3bfde6a5b3a3 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.077786 [ 4103 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:40996, User-Agent: clickhouse-js/1.25.0 (lv:nodejs/v24.22.1; os:win32), Content Type: , Transfer Encoding: chunked, X-Forwarded-For: (none)
+2026.11.18 09:44:47.077887 [ 4103 ] {} <Trace> DynamicQueryHandler: Request URI: /?query_id=64870f5f-01ba-43b8-a5bf-9710eb46bf2c&max_execution_time=60
+2026.11.18 09:44:47.077909 [ 4103 ] {} <Debug> HTTP-Session-6ce4e1d7-f82d-427b-bcd4-306e3420fb41: Authenticating user 'default' from [::1]:40996
+2026.11.18 09:44:47.077932 [ 4103 ] {} <Debug> HTTP-Session-6ce4e1d7-f82d-427b-bcd4-306e3420fb41: 6ce4e1d7-f82d-427b-bcd4-306e3420fb41 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.077936 [ 4103 ] {} <Debug> HTTP-Session-6ce4e1d7-f82d-427b-bcd4-306e3420fb41: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.078011 [ 4103 ] {} <Trace> HTTP-Session-6ce4e1d7-f82d-427b-bcd4-306e3420fb41: 6ce4e1d7-f82d-427b-bcd4-306e3420fb41 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 09:44:47.078067 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> HTTPServerRequest: creating in_post id 138062565701264
+2026.11.18 09:44:47.078217 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> executeQuery: (from [::1]:40996) CREATE TABLE `uji_bersihdata`.`__tmp_ingest_66f23b2091c0` (`id` Nullable(String), `alamat_kantor` Nullable(String), `asal_instansi` Nullable(String), `provinsi_instansi` Nullable(String), `kabkot_instansi` Nullable(String), `tahun` Nullable(String), `judul_diklat` Nullable(String)) ENGINE = MergeTree ORDER BY tuple() (stage: Complete)
+2026.11.18 09:44:47.084767 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:47.084809 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> MemoryTrackerUtils: Lower number of threads for query to 6 (8 requested)
+2026.11.18 09:44:47.109448 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da): Loading data parts
+2026.11.18 09:44:47.114343 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da): Loaded data parts (0 items) took 0.005 seconds
+2026.11.18 09:44:47.126336 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> AsyncLoader: Prioritize load job 'startup Atomic database uji_bersihdata': BackgrndStartup -> ForegroundLoad
+2026.11.18 09:44:47.126341 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> AsyncLoader: Prioritize load job 'startup Ordinary database uji_bersihdata': BackgrndStartup -> ForegroundLoad
+2026.11.18 09:44:47.148057 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> DatabaseAtomic (uji_bersihdata): Trying to create a symlink for table uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da), data_path /mnt/c/WINDOWS/system32/.clickhouse/servers/default/data/store/a43/a436ce09-4ac0-439d-8138-ec851aad04da/, link data/uji_bersihdata/__tmp_ingest_66f23b2091c0
+2026.11.18 09:44:47.168687 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Information> uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da): Start to refresh statistics
+2026.11.18 09:44:47.168762 [ 4304 ] {BgSchPool::92609e26-43ed-48e9-8320-b9f57e6d5e85} <Debug> uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da): Refreshing statistics
+2026.11.18 09:44:47.169079 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> DynamicQueryHandler: Done processing query
+2026.11.18 09:44:47.169112 [ 4103 ] {64870f5f-01ba-43b8-a5bf-9710eb46bf2c} <Debug> MemoryTracker: Query peak memory usage: 1.00 MiB.
+2026.11.18 09:44:47.169120 [ 4103 ] {} <Debug> HTTP-Session-6ce4e1d7-f82d-427b-bcd4-306e3420fb41: 6ce4e1d7-f82d-427b-bcd4-306e3420fb41 Logout, user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.169466 [ 4274 ] {BgSchPool::c067787b-d774-45b9-8452-d35125624017} <Trace> uji_bersihdata.__tmp_ingest_66f23b2091c0 (a436ce09-4ac0-439d-8138-ec851aad04da): Didn't start merge: There are no parts that can be merged. (Collector returned empty ranges set)
+2026.11.18 09:44:47.329198 [ 4103 ] {} <Trace> HTTPHandler-factory: HTTP Request for HTTPHandler-factory. Method: POST, Address: [::1]:41000, User-Agent: (none), Length: 6033000, Content Type: text/csv; charset=utf-8, Transfer Encoding: identity, X-Forwarded-For: (none)
+2026.11.18 09:44:47.329312 [ 4103 ] {} <Trace> DynamicQueryHandler: Request URI: /?query=INSERT+INTO+%60uji_bersihdata%60.%60__tmp_ingest_66f23b2091c0%60+%28%60id%60%2C+%60alamat_kantor%60%2C+%60asal_instansi%60%2C+%60provinsi_instansi%60%2C+%60kabkot_instansi%60%2C+%60tahun%60%2C+%60judul_diklat%60%29+FORMAT+CSV&format_csv_delimiter=%2C&input_format_csv_skip_first_lines=0&input_format_csv_detect_header=0&format_csv_allow_double_quotes=1&format_csv_allow_single_quotes=0&input_format_allow_errors_num=0&input_format_allow_errors_ratio=0&input_format_csv_allow_variable_number_of_columns=0&input_format_csv_use_default_on_bad_values=0&input_format_csv_empty_as_default=0&format_csv_null_representation=%5CN&input_format_csv_skip_trailing_empty_lines=1&input_format_parallel_parsing=0&max_threads=1&max_insert_threads=1&max_memory_usage=536870912&max_execution_time=600
+2026.11.18 09:44:47.329346 [ 4103 ] {} <Debug> HTTP-Session-6680dd6d-c6f6-4cbc-8b38-38a758934179: Authenticating user 'default' from [::1]:41000
+2026.11.18 09:44:47.329367 [ 4103 ] {} <Debug> HTTP-Session-6680dd6d-c6f6-4cbc-8b38-38a758934179: 6680dd6d-c6f6-4cbc-8b38-38a758934179 Authenticated with global context as user 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.329370 [ 4103 ] {} <Debug> HTTP-Session-6680dd6d-c6f6-4cbc-8b38-38a758934179: Creating session context with user_id: 94309d50-4f52-5250-31bd-74fecac179db
+2026.11.18 09:44:47.329467 [ 4103 ] {} <Trace> HTTP-Session-6680dd6d-c6f6-4cbc-8b38-38a758934179: 6680dd6d-c6f6-4cbc-8b38-38a758934179 Creating query context from session context, user_id: 94309d50-4f52-5250-31bd-74fecac179db, parent context user: default
+2026.11.18 09:44:47.329550 [ 4103 ] {6f5e1f06-f8b3-4d13-8073-7dd790d7372f} <Debug> HTTPServerRequest: creating in_post id 138062566001728
+2026.11.18 09:44:47.329940 [ 4103 ] {6f5e1f06-f8b3-4d13-8073-7dd790d7372f} <Debug> executeQuery: (from [::1]:41000) INSERT INTO `uji_bersihdata`.`__tmp_ingest_66f23b2091c0` (`id`, `alamat_kantor`, `asal_instansi`, `provinsi_instansi`, `kabkot_instansi`, `tahun`, `judul_diklat`) FORMAT CSV  (stage: Complete)
+2026.11.18 09:44:47.341464 [ 4103 ] {6f5e1f06-f8b3-4d13-8073-7dd790d7372f} <Trace> AsynchronousInsertQueue: Have 1 pending inserts in shard 6 with total 6033000 bytes of data
+2026.11.18 09:44:47.392360 [ 4317 ] {1e8cb9f2-be44-4a41-a0b9-05af06d3c234} <Trace> AsynchronousInsertQueue: Processing batch insert of 1 async inserts with 6033000 bytes of data
+2026.11.18 09:44:47.392576 [ 4317 ] {1e8cb9f2-be44-4a41-a0b9-05af06d3c234} <Debug> InsertDependenciesBuilder: deduplicate_blocks : true
+2026.11.18 09:44:47.436829 [ 4317 ] {1e8cb9f2-be44-4a41-a0b9-05af06d3c234} <Debug> AsynchronousInsertQueue: Processed 49996 rows with parsing them for 1 entries
+contrib/llvm-project/libcxx/include/string_view:331: libc++ Hardening assertion __len <= static_cast<size_type>(numeric_limits<difference_type>::max()) failed: string_view::string_view(_CharT *, size_t): length does not fit in difference_type
+2026.11.18 09:44:47.440785 [ 4099 ] {} <Trace> BaseDaemon: Received signal 6
+2026.11.18 09:44:47.440851 [ 4099 ] {} <Fatal> BaseDaemon: ########## Short fault info ############
+2026.11.18 09:44:47.440859 [ 4099 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138, architecture: x86_64) (from thread 4317) Received signal 6 (internal)
+2026.11.18 09:44:47.440861 [ 4099 ] {} <Fatal> BaseDaemon: Signal description: Aborted
+2026.11.18 09:44:47.440862 [ 4099 ] {} <Fatal> BaseDaemon: Sent by tkill.
+2026.11.18 09:44:47.440868 [ 4099 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000000009691d in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000042406 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x00000000000287f3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x000000002789eb25 0x000000000e5d5170 0x000000001a9b9010 0x000000002008cfb6 0x000000002007a392 0x000000001fbeabee 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001ded40b6 0x000000001dedf7e1 0x00000000185d50c3 0x00000000185deab3 0x00000000185d267a 0x00000000185dbb9a 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+2026.11.18 09:44:47.440872 [ 4099 ] {} <Fatal> BaseDaemon: ########################################
+2026.11.18 09:44:47.440876 [ 4099 ] {} <Fatal> BaseDaemon: (version 26.10.1.428 (official build), build id: 9C07555C30B61717E9033FE81C7139B3AF73BB86, git hash: 665a3215c11197ce1f55590a353c672bb2a93138) (from thread 4317) (query_id: 1e8cb9f2-be44-4a41-a0b9-05af06d3c234) (query: INSERT INTO uji_bersihdata.__tmp_ingest_66f23b2091c0 (id, alamat_kantor, asal_instansi, provinsi_instansi, kabkot_instansi, tahun, judul_diklat) FORMAT CSV) Received signal Aborted (6)
+2026.11.18 09:44:47.440877 [ 4099 ] {} <Fatal> BaseDaemon: Sent by tkill.
+2026.11.18 09:44:47.440882 [ 4099 ] {} <Fatal> BaseDaemon: Stack trace: 0x000000000009691d in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000042406 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x00000000000287f3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x000000002789eb25 0x000000000e5d5170 0x000000001a9b9010 0x000000002008cfb6 0x000000002007a392 0x000000001fbeabee 0x000000001fbe95cd 0x000000001fdc41ce 0x000000001fdb859b 0x0000000020c2ea93 0x0000000020a2838a 0x0000000020a28200 0x0000000020a277c0 0x00000000206da78a 0x00000000206ca61a 0x00000000206c8b09 0x00000000206c88d0 0x00000000206bf90a 0x000000001ded40b6 0x000000001dedf7e1 0x00000000185d50c3 0x00000000185deab3 0x00000000185d267a 0x00000000185dbb9a 0x00000000000949e3 in /usr/lib/x86_64-linux-gnu/libc.so.6 0x0000000000126860 in /usr/lib/x86_64-linux-gnu/libc.so.6
+2026.11.18 09:44:47.440916 [ 4099 ] {} <Fatal> BaseDaemon: 2. pthread_kill @ 0x000000000009691d
+2026.11.18 09:44:47.440920 [ 4099 ] {} <Fatal> BaseDaemon: 3. raise @ 0x0000000000042406
+2026.11.18 09:44:47.440923 [ 4099 ] {} <Fatal> BaseDaemon: 4. __lgamma_r_finite @ 0x00000000000287f3
+2026.11.18 09:44:47.440938 [ 4099 ] {} <Fatal> BaseDaemon: 5. ? @ 0x000000002789eb25
+2026.11.18 09:44:47.440942 [ 4099 ] {} <Fatal> BaseDaemon: 6. ? @ 0x000000000e5d5170
+2026.11.18 09:44:47.451791 [ 4099 ] {} <Fatal> BaseDaemon: 7. DB::AggregateFunctionNullUnary<true, true>::addBatchSinglePlace(unsigned long, unsigned long, char*, DB::IColumn const**, DB::Arena*, long) const @ 0x000000001a9b9010
+2026.11.18 09:44:47.460901 [ 4099 ] {} <Fatal> BaseDaemon: 8. DB::StatisticsUniq::build(COW<DB::IColumn>::immutable_ptr<DB::IColumn> const&) @ 0x000000002008cfb6
+2026.11.18 09:44:47.469740 [ 4099 ] {} <Fatal> BaseDaemon: 9. DB::ColumnsStatistics::build(DB::Block const&) @ 0x000000002007a392
+2026.11.18 09:44:47.478823 [ 4099 ] {} <Fatal> BaseDaemon: 10. DB::MergeTreeDataWriter::writeTempPartImpl(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, String, std::optional<DB::PatchPartIndex>, std::shared_ptr<DB::Context const>, unsigned long, bool) @ 0x000000001fbeabee
+2026.11.18 09:44:47.478846 [ 4099 ] {} <Fatal> BaseDaemon: 11. DB::MergeTreeDataWriter::writeTempPart(DB::BlockWithPartition&, std::shared_ptr<DB::StorageInMemoryMetadata const>, std::shared_ptr<DB::Context const>, bool) @ 0x000000001fbe95cd
+2026.11.18 09:44:47.478857 [ 4099 ] {} <Fatal> BaseDaemon: 12. DB::MergeTreeSink::writeNewTempPart(DB::BlockWithPartition&) @ 0x000000001fdc41ce
+2026.11.18 09:44:47.478862 [ 4099 ] {} <Fatal> BaseDaemon: 13. DB::MergeTreeSink::consume(DB::Chunk&) @ 0x000000001fdb859b
+2026.11.18 09:44:47.478866 [ 4099 ] {} <Fatal> BaseDaemon: 14. DB::SinkToStorage::onConsume(DB::Chunk) @ 0x0000000020c2ea93
+2026.11.18 09:44:47.478877 [ 4099 ] {} <Fatal> BaseDaemon: 15. void std::__function::__policy_func<void ()>::__call_func[abi:fqe220101]<DB::ExceptionKeepingTransform::work()::$_1>(std::__function::__policy_storage const*) @ 0x0000000020a2838a
+2026.11.18 09:44:47.478883 [ 4099 ] {} <Fatal> BaseDaemon: 16. DB::runStep(std::function<void ()>, std::shared_ptr<DB::ThreadGroup>&) @ 0x0000000020a28200
+2026.11.18 09:44:47.485286 [ 4099 ] {} <Fatal> BaseDaemon: 17. DB::ExceptionKeepingTransform::work() @ 0x0000000020a277c0
+2026.11.18 09:44:47.485303 [ 4099 ] {} <Fatal> BaseDaemon: 18. DB::ExecutionThreadContext::executeTask() @ 0x00000000206da78a
+2026.11.18 09:44:47.485316 [ 4099 ] {} <Fatal> BaseDaemon: 19. DB::PipelineExecutor::executeStepImpl(unsigned long, DB::WorkloadResources&&, std::atomic<bool>*) @ 0x00000000206ca61a
+2026.11.18 09:44:47.485320 [ 4099 ] {} <Fatal> BaseDaemon: 20. DB::PipelineExecutor::executeImpl(unsigned long, bool) @ 0x00000000206c8b09
+2026.11.18 09:44:47.485322 [ 4099 ] {} <Fatal> BaseDaemon: 21. DB::PipelineExecutor::execute(unsigned long, bool) @ 0x00000000206c88d0
+2026.11.18 09:44:47.485327 [ 4099 ] {} <Fatal> BaseDaemon: 22. DB::CompletedPipelineExecutor::execute() @ 0x00000000206bf90a
+2026.11.18 09:44:47.490929 [ 4099 ] {} <Fatal> BaseDaemon: 23. DB::AsynchronousInsertQueue::processData(DB::AsynchronousInsertQueue::InsertQuery, std::unique_ptr<DB::AsynchronousInsertQueue::InsertData, std::default_delete<DB::AsynchronousInsertQueue::InsertData>>, std::shared_ptr<DB::Context const>, std::shared_ptr<DB::ThreadGroup>, DB::AsynchronousInsertQueue::QueueShardFlushTimeHistory&) @ 0x000000001ded40b6
+2026.11.18 09:44:47.490965 [ 4099 ] {} <Fatal> BaseDaemon: 24. void std::__function::__policy_func<void ()>::__call_func[abi:fqe220101]<DB::AsynchronousInsertQueue::scheduleDataProcessingJob(DB::AsynchronousInsertQueue::InsertQuery const&, std::unique_ptr<DB::AsynchronousInsertQueue::InsertData, std::default_delete<DB::AsynchronousInsertQueue::InsertData>>, std::shared_ptr<DB::Context const>, unsigned long, std::shared_ptr<DB::ThreadGroup>)::$_0>(std::__function::__policy_storage const*) @ 0x000000001dedf7e1
+2026.11.18 09:44:47.490978 [ 4099 ] {} <Fatal> BaseDaemon: 25. ThreadPoolImpl<ThreadFromGlobalPoolImpl<false, true>>::ThreadFromThreadPool::worker() @ 0x00000000185d50c3
+2026.11.18 09:44:47.490984 [ 4099 ] {} <Fatal> BaseDaemon: 26. void std::__function::__policy_func<void ()>::__call_func[abi:fqe220101]<startThreadFromGlobalPool(std::shared_ptr<ThreadFromGlobalPoolState>, std::function<void ()>, unsigned long, unsigned long, bool, bool)::$_0>(std::__function::__policy_storage const*) @ 0x00000000185deab3
+2026.11.18 09:44:47.490987 [ 4099 ] {} <Fatal> BaseDaemon: 27. ThreadPoolImpl<std::thread>::ThreadFromThreadPool::worker() @ 0x00000000185d267a
+2026.11.18 09:44:47.499939 [ 4099 ] {} <Fatal> BaseDaemon: 28. void* std::__thread_proxy[abi:fqe220101]<std::tuple<std::unique_ptr<std::__thread_struct, std::default_delete<std::__thread_struct>>, void (ThreadPoolImpl<std::thread>::ThreadFromThreadPool::*)(), ThreadPoolImpl<std::thread>::ThreadFromThreadPool*>>(void*) @ 0x00000000185dbb9a
+2026.11.18 09:44:47.499955 [ 4099 ] {} <Fatal> BaseDaemon: 29. ? @ 0x00000000000949e3
+2026.11.18 09:44:47.499957 [ 4099 ] {} <Fatal> BaseDaemon: 30. ? @ 0x0000000000126860
+2026.11.18 09:44:47.758134 [ 4099 ] {} <Fatal> BaseDaemon: Integrity check of the executable successfully passed (checksum: 6BBE614FC9BF5AF748E98999A3FA33D6)
+2026.11.18 09:44:47.758161 [ 4099 ] {} <Information> CrashWriter: Sending crash report
+2026.11.18 09:44:47.808952 [ 4099 ] {} <Trace> WriteBufferToHTTP: Sending request to https://crash.clickhouse.com/
+2026.11.18 09:44:48.301573 [ 4099 ] {} <Fatal> BaseDaemon: ClickHouse version 26.10.1.428 is old and should be upgraded to the latest version.
+2026.11.18 09:44:48.301717 [ 4099 ] {} <Fatal> BaseDaemon: Changed settings: max_insert_threads = 1, max_threads = 1, max_execution_time = 600., max_memory_usage = 536870912, input_format_parallel_parsing = false, input_format_csv_empty_as_default = false, input_format_csv_detect_header = false, input_format_csv_skip_trailing_empty_lines = true
+2026.11.18 09:44:50.566029 [ 4279 ] {BgSchPool::cc563a8c-6856-4a47-856a-efe07da442b1} <Debug> DNSResolver: Updating DNS cache
+2026.11.18 09:44:50.592124 [ 4279 ] {BgSchPool::cc563a8c-6856-4a47-856a-efe07da442b1} <Debug> DNSResolver: Updated DNS cache
+arizal@DESKTOP-DN8657N:/mnt/c/WINDOWS/system32$
+
+
+
+
+
+
+
+

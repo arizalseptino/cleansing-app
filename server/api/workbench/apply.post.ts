@@ -2,6 +2,7 @@ import { compilePipeline } from '../../workbench/compiler'
 import type { Pipeline } from '../../workbench/types'
 import { quoteIdentifier } from '../../workbench/utils'
 import { recordCleansingHistory } from '../../features/cleansing-history'
+import { createMergeTreeTableSafe } from '../../features/metadata'
 
 function badRequest(statusCode: number, statusMessage: string, message: string): never {
   throw createError({ statusCode, statusMessage, message })
@@ -179,10 +180,11 @@ export default defineEventHandler(async (event) => {
     const columnSql = compiled.schema.map((column) => `${quoteIdentifier(column.name)} ${column.type}`).join(', ')
     const orderByClause = orderBy.length ? quoteIdentifier(orderBy[0]) : 'tuple()'
 
-    await client.command({
-      query: `CREATE TABLE ${tableIdentifier} (${columnSql}) ENGINE ${engine} ORDER BY ${orderByClause}`,
-      clickhouse_settings: { max_execution_time: 180 },
-    })
+    await createMergeTreeTableSafe(
+      client,
+      `CREATE TABLE ${tableIdentifier} (${columnSql}) ENGINE ${engine} ORDER BY ${orderByClause}`,
+      180,
+    )
     resultTableCreated = true
 
     await client.command({
