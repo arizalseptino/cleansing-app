@@ -77,12 +77,10 @@
             v-model="draft[parameter.key]"
             type="checkbox"
             :value="option"
+            @change="handleMultiselectChange(parameter.key, option, $event)"
           />
           <span>{{ optionLabel(option) }}</span>
         </label>
-        <p v-if="parameter.key === 'operations' && titleModeSelected" class="operation-hint" role="status">
-          Backend saat ini menjalankan mode kapitalisasi judul sebagai huruf kecil.
-        </p>
       </fieldset>
 
       <div v-else-if="parameter.type === 'pairs'" class="pair-list">
@@ -328,7 +326,7 @@ const optionLabels: Record<string, string> = {
   empty_to_null: 'Ubah teks kosong menjadi NULL',
   upper: 'Ubah menjadi huruf kapital',
   lower: 'Ubah menjadi huruf kecil',
-  title: 'Huruf kecil (mode kapitalisasi judul)',
+  title: 'Ubah menjadi kapital awal kata (Title Case)',
   most_complete: 'Paling lengkap',
   first: 'Pertama',
   last: 'Terakhir',
@@ -376,10 +374,18 @@ function isParameterVisible(parameter: Parameter): boolean {
   return true
 }
 
-const titleModeSelected = computed(() => {
-  const selected = draft.operations
-  return Array.isArray(selected) && selected.some((option) => option === 'title')
-})
+const CASE_OPERATION_OPTIONS = new Set(['upper', 'lower', 'title'])
+
+function handleMultiselectChange(parameterKey: string, option: string, event: Event): void {
+  if (parameterKey !== 'operations' || !CASE_OPERATION_OPTIONS.has(option)) return
+  const checked = (event.target as HTMLInputElement).checked
+  if (!checked) return
+  const current = Array.isArray(draft[parameterKey]) ? draft[parameterKey] as string[] : []
+  draft[parameterKey] = [
+    ...current.filter((item) => !CASE_OPERATION_OPTIONS.has(item)),
+    option,
+  ]
+}
 
 watch(
   () => [props.operation.id, props.initialParams, props.prefilledColumn] as const,

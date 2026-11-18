@@ -1255,7 +1255,9 @@ export class MockClickHouseClient {
     if (fn === 'initcap') {
       const v = this.evalExpr(args[0], row, ctes)
       if (v === null || v === undefined) return null
-      return String(v).toLowerCase().replace(/(^|\s)\S/g, (ch) => ch.toUpperCase())
+      return String(v)
+        .toLowerCase()
+        .replace(/(^|\s)([^\p{L}\p{N}]*)(\p{L})/gu, (_, space: string, prefix: string, ch: string) => `${space}${prefix}${ch.toUpperCase()}`)
     }
     if (fn === 'replaceregexpall') {
       const v = this.evalExpr(args[0], row, ctes)
