@@ -169,6 +169,7 @@ export async function compilePipeline(
   }
   const touchedColumns = new Set<string>()
   const addedColumns = new Set<string>()
+  const extractCreatedColumns = new Set<string>()
   const warnings: string[] = []
   let changesRowCount = false
 
@@ -190,6 +191,7 @@ export async function compilePipeline(
         inputParams: { ...boundParams },
         getColumnSourceSql,
         skipHeavyValidation: options.skipHeavyValidation,
+        extractCreatedColumns,
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)
@@ -199,6 +201,9 @@ export async function compilePipeline(
       const stepAddedColumns = [...new Set(compiled.addedColumns)]
       for (const column of stepTouchedColumns) touchedColumns.add(column)
       for (const column of stepAddedColumns) addedColumns.add(column)
+      if (step.op === 'extract_and_route') {
+        for (const column of stepAddedColumns) extractCreatedColumns.add(column)
+      }
       const includeBefore = options.includeBefore && index === pipeline.steps.length - 1
       const beforeColumns = [...new Set(compiled.beforeColumns ?? compiled.touchedColumns)]
       const beforeAliases = includeBefore

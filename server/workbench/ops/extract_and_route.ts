@@ -61,18 +61,22 @@ const extractAndRoute: OperationDefinition = {
       }
     }
 
-    const createTarget = context.params.createTarget === true
+    const createTargetRequested = context.params.createTarget === true
     if (context.params.createTarget !== undefined && typeof context.params.createTarget !== 'boolean') {
       fail('Pilihan membuat kolom baru tidak valid.')
     }
-    if (!createTarget && typeof context.params.targetColumn !== 'string') fail('Pilih kolom target.')
-    const target = createTarget
+    if (!createTargetRequested && typeof context.params.targetColumn !== 'string') fail('Pilih kolom target.')
+    const target = createTargetRequested
       ? normalizeColumnName(String(context.params.newTargetName ?? ''))
       : String(context.params.targetColumn ?? '')
+    const metadata = context.schema.find(({ name }) => name === target)
+    const reusedFromPreviousExtract = createTargetRequested
+      && Boolean(metadata)
+      && Boolean(context.extractCreatedColumns?.has(target))
+    const createTarget = createTargetRequested && !reusedFromPreviousExtract
     if (createTarget) {
-      if (context.schema.some(({ name }) => name === target)) fail('Nama kolom target baru sudah digunakan.')
+      if (metadata) fail('Nama kolom target baru sudah digunakan.')
     } else {
-      const metadata = context.schema.find(({ name }) => name === target)
       if (!metadata) fail('Kolom target tidak ditemukan pada skema pipeline.')
       if (!/String/.test(metadata.type)) fail('Kolom target yang sudah ada harus bertipe teks.')
     }
@@ -102,10 +106,14 @@ const extractAndRoute: OperationDefinition = {
     const pattern = String(context.params.pattern ?? '')
     const action = String(context.params.action)
     const source = quoteIdentifier(sourceColumn)
-    const createTarget = context.params.createTarget === true
-    const targetName = createTarget
+    const createTargetRequested = context.params.createTarget === true
+    const targetName = createTargetRequested
       ? normalizeColumnName(String(context.params.newTargetName ?? ''))
       : String(context.params.targetColumn ?? '')
+    const reusedFromPreviousExtract = createTargetRequested
+      && context.schema.some(({ name }) => name === targetName)
+      && Boolean(context.extractCreatedColumns?.has(targetName))
+    const createTarget = createTargetRequested && !reusedFromPreviousExtract
     const target = quoteIdentifier(targetName)
     const clearSource = action === 'move'
       || (action === 'extract' && context.params.clearSourceAfterExtract === true)

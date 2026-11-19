@@ -388,14 +388,44 @@ export default defineEventHandler(async (event) => {
     await getTableMetadata(client, source)
 
     const validPrefix: PipelineStep[] = []
+    const extractCreatedColumns = new Set<string>()
     for (let i = 0; i < sanitizedSteps.length; i += 1) {
-      const step = sanitizedSteps[i]
+      let step = sanitizedSteps[i]
+      if (
+        step.op === 'extract_and_route'
+        && step.params?.createTarget === true
+        && typeof step.params.newTargetName === 'string'
+      ) {
+        const candidateTarget = step.params.newTargetName.trim()
+        if (candidateTarget && extractCreatedColumns.has(candidateTarget)) {
+          step = {
+            ...step,
+            params: {
+              ...step.params,
+              createTarget: false,
+              targetColumn: candidateTarget,
+              newTargetName: '',
+            },
+          }
+          sanitizedSteps[i] = step
+        }
+      }
       try {
         const compiled = await compilePipeline(client, {
           source,
           steps: [...validPrefix, step],
         })
         validPrefix.push(step)
+        if (
+          step.op === 'extract_and_route'
+          && step.params?.createTarget === true
+          && typeof step.params.newTargetName === 'string'
+        ) {
+          const createdName = step.params.newTargetName.trim()
+          if (createdName && compiled.addedColumns.includes(createdName)) {
+            extractCreatedColumns.add(createdName)
+          }
+        }
         validCount += 1
         stepStatuses.push({
           index: i,
