@@ -63,7 +63,7 @@ type ExprNode =
   | { kind: 'call'; name: string; args: ExprNode[]; over?: { partitionBy: ExprNode[]; orderBy: OrderItem[] } }
   | { kind: 'unary'; op: string; expr: ExprNode }
   | { kind: 'binary'; op: string; left: ExprNode; right: ExprNode }
-  | { kind: 'in'; left: ExprNode; values: ExprNode[]; not?: boolean }
+  | { kind: 'in'; left: ExprNode; values: ExprNode[]; subquery?: QueryNode; not?: boolean }
   | { kind: 'case'; branches: Array<{ when: ExprNode; then: ExprNode }>; elseExpr: ExprNode | null }
   | { kind: 'lambda'; params: string[]; body: ExprNode }
   | { kind: 'array'; items: ExprNode[] }
@@ -686,11 +686,11 @@ class SqlParser {
       } else if (this.isKeyword('NOT') && this.isKeyword('IN', 1)) {
         this.next()
         this.next()
-        const values = this.parseInList()
-        left = { kind: 'in', left, values, not: true }
+        const { values, subquery } = this.parseInList()
+        left = { kind: 'in', left, values, subquery, not: true }
       } else if (this.matchKeyword('IN')) {
-        const values = this.parseInList()
-        left = { kind: 'in', left, values, not: false }
+        const { values, subquery } = this.parseInList()
+        left = { kind: 'in', left, values, subquery, not: false }
       } else {
         break
       }
@@ -698,8 +698,13 @@ class SqlParser {
     return left
   }
 
-  private parseInList(): ExprNode[] {
+  private parseInList(): { values: ExprNode[]; subquery?: QueryNode } {
     this.expectPunct('(')
+    if (this.isKeyword('SELECT') || this.isKeyword('WITH')) {
+      const subquery = this.parseQuery()
+      this.expectPunct(')')
+      return { values: [], subquery }
+    }
     const values: ExprNode[] = []
     if (!this.matchPunct(')')) {
       do {
@@ -707,7 +712,7 @@ class SqlParser {
       } while (this.matchPunct(','))
       this.expectPunct(')')
     }
-    return values
+    return { values }
   }
 
   private parseAddSub(): ExprNode {
@@ -1203,7 +1208,11 @@ export class MockClickHouseClient {
       case 'in': {
         const left = this.evalExpr(expr.left, row, ctes)
         let list: unknown[] = []
-        if (expr.values.length === 1) {
+        if (expr.subquery) {
+          const subRes = this.evalQuery(expr.subquery, ctes)
+          const firstCol = subRes.columns[0]?.name
+          list = firstCol ? subRes.rows.map((r) => r[firstCol]) : []
+        } else if (expr.values.length === 1) {
           const single = this.evalExpr(expr.values[0], row, ctes)
           list = Array.isArray(single) ? single : [single]
         } else {

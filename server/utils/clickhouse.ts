@@ -67,14 +67,14 @@ export function useClickHouse(): ClickHouseLikeClient {
         url: config.clickhouseUrl,
         username: config.clickhouseUser,
         password: config.clickhousePassword,
-        request_timeout: 600_000,
+        request_timeout: 900_000,
         max_response_headers_size: 65536,
         keep_alive: {
           enabled: false,
         },
         clickhouse_settings: {
           ...CLICKHOUSE_MEMORY_SETTINGS,
-          max_execution_time: 300,
+          max_execution_time: 900,
         },
       }) as unknown as ClickHouseLikeClient
     } else {

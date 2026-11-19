@@ -261,67 +261,134 @@ export function buildFuzzyMappingSql(options: {
     WHERE ${masterNonEmpty}
   `
 
-  let pairScoreExpr: string
-  let pairFilterClause: string
+  let matchedBodySql: string
   if (options.mode === 'keyword') {
-    pairScoreExpr = `if(
+    const pairScoreExpr = `if(
       src_u.s_norm = mst_u.m_norm,
       toFloat64(1),
       least(toFloat64(mst_u.m_len) / toFloat64(greatest(lengthUTF8(src_u.s_norm), 1)), toFloat64(0.999999))
     )`
-    pairFilterClause = 'WHERE src_u.s_norm = mst_u.m_norm OR position(src_u.s_norm, mst_u.m_norm) > 0'
-  } else {
-    const simExpr = buildSimilarityScoreExpr('src_u.s_norm', 'mst_u.m_norm', options.algorithm)
-    pairScoreExpr = `if(
-      src_u.s_norm = mst_u.m_norm,
-      toFloat64(1),
-      least(${simExpr}, toFloat64(0.999999))
-    )`
-    pairFilterClause = `WHERE pair_exact = 1 OR pair_score >= {${options.thresholdParamName}:Float64}`
-  }
+    const pairFilterClause = 'WHERE src_u.s_norm = mst_u.m_norm OR position(src_u.s_norm, mst_u.m_norm) > 0'
 
-  const matchedBodySql = `
-    SELECT
-      s_norm,
-      best_exact,
-      best_score,
-      length(best_masters) AS best_cnt,
-      arrayElement(best_masters, 1) AS first_master
-    FROM (
+    matchedBodySql = `
       SELECT
         s_norm,
         best_exact,
         best_score,
-        arrayDistinct(
-          arrayMap(
-            x -> tupleElement(x, 3),
-            arrayFilter(
-              x -> tupleElement(x, 1) = best_exact AND tupleElement(x, 2) = best_score,
-              all_pairs
-            )
-          )
-        ) AS best_masters
+        length(best_masters) AS best_cnt,
+        arrayElement(best_masters, 1) AS first_master
       FROM (
         SELECT
           s_norm,
-          max(pair_exact) AS best_exact,
-          max(pair_score) AS best_score,
-          groupUniqArray((pair_exact, pair_score, m_orig)) AS all_pairs
+          best_exact,
+          best_score,
+          arrayDistinct(
+            arrayMap(
+              x -> tupleElement(x, 3),
+              arrayFilter(
+                x -> tupleElement(x, 1) = best_exact AND tupleElement(x, 2) = best_score,
+                all_pairs
+              )
+            )
+          ) AS best_masters
         FROM (
           SELECT
-            src_u.s_norm AS s_norm,
-            mst_u.m_orig AS m_orig,
-            if(src_u.s_norm = mst_u.m_norm, toUInt8(1), toUInt8(0)) AS pair_exact,
-            ${pairScoreExpr} AS pair_score
-          FROM (${uniqueSourceSubquery}) AS src_u
-          CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
-          ${options.mode === 'keyword' ? pairFilterClause : ''}
+            s_norm,
+            max(pair_exact) AS best_exact,
+            max(pair_score) AS best_score,
+            groupUniqArray((pair_exact, pair_score, m_orig)) AS all_pairs
+          FROM (
+            SELECT
+              src_u.s_norm AS s_norm,
+              mst_u.m_orig AS m_orig,
+              if(src_u.s_norm = mst_u.m_norm, toUInt8(1), toUInt8(0)) AS pair_exact,
+              ${pairScoreExpr} AS pair_score
+            FROM (${uniqueSourceSubquery}) AS src_u
+            CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
+            ${pairFilterClause}
+          )
+          GROUP BY s_norm
         )
-        ${options.mode === 'similarity' ? pairFilterClause : ''}
-        GROUP BY s_norm
       )
-    )
-  `
+    `
+  } else {
+    const simExpr = buildSimilarityScoreExpr('src_u.s_norm', 'mst_u.m_norm', options.algorithm)
+    const pairScoreExpr = `least(${simExpr}, toFloat64(0.999999))`
+    const masterNormOnlySubquery = `
+      SELECT DISTINCT ${masterNormExpr} AS m_norm
+      FROM ${options.masterIdentifier}${options.masterFinal}
+      WHERE ${masterNonEmpty}
+    `
+    const exactMasterGroupedSql = `
+      SELECT
+        m_norm,
+        uniqExact(m_orig) AS m_cnt,
+        any(m_orig) AS first_m_orig
+      FROM (${uniqueMasterSubquery})
+      GROUP BY m_norm
+    `
+    const exactBranchSql = `
+      SELECT
+        src_u.s_norm AS s_norm,
+        toUInt8(1) AS best_exact,
+        toFloat64(1) AS best_score,
+        mst_exact.m_cnt AS best_cnt,
+        mst_exact.first_m_orig AS first_master
+      FROM (${uniqueSourceSubquery}) AS src_u
+      INNER JOIN (${exactMasterGroupedSql}) AS mst_exact
+      ON src_u.s_norm = mst_exact.m_norm
+    `
+    const fuzzyBranchSql = `
+      SELECT
+        s_norm,
+        best_exact,
+        best_score,
+        length(best_masters) AS best_cnt,
+        arrayElement(best_masters, 1) AS first_master
+      FROM (
+        SELECT
+          s_norm,
+          best_exact,
+          best_score,
+          arrayDistinct(
+            arrayMap(
+              x -> tupleElement(x, 3),
+              arrayFilter(
+                x -> tupleElement(x, 1) = best_exact AND tupleElement(x, 2) = best_score,
+                all_pairs
+              )
+            )
+          ) AS best_masters
+        FROM (
+          SELECT
+            s_norm,
+            max(pair_exact) AS best_exact,
+            max(pair_score) AS best_score,
+            groupUniqArray((pair_exact, pair_score, m_orig)) AS all_pairs
+          FROM (
+            SELECT
+              src_u.s_norm AS s_norm,
+              mst_u.m_orig AS m_orig,
+              toUInt8(0) AS pair_exact,
+              ${pairScoreExpr} AS pair_score
+            FROM (
+              SELECT s_norm
+              FROM (${uniqueSourceSubquery})
+              WHERE s_norm NOT IN (${masterNormOnlySubquery})
+            ) AS src_u
+            CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
+          )
+          WHERE pair_score >= {${options.thresholdParamName}:Float64}
+          GROUP BY s_norm
+        )
+      )
+    `
+    matchedBodySql = `
+      ${exactBranchSql}
+      UNION ALL
+      ${fuzzyBranchSql}
+    `
+  }
 
   if (options.includeUnmatched === false) {
     return `
@@ -485,9 +552,13 @@ const fuzzyMatchMaster: OperationDefinition = {
     const masterNormExpr = buildNormalizedTextExpr(`assumeNotNull(${masterField})`, parsed.mode, parsed.normalizations)
     const masterNonEmpty = `(${masterField} IS NOT NULL AND trimBoth(toString(assumeNotNull(${masterField}))) != '' AND ${masterNormExpr} != '')`
 
+    const srcBudgetFilter = parsed.mode === 'similarity'
+      ? `${srcNonEmpty} AND ${srcNormExpr} NOT IN (SELECT DISTINCT ${masterNormExpr} FROM ${masterIdentifier}${masterFinal} WHERE ${masterNonEmpty})`
+      : srcNonEmpty
+
     const [srcCountRes, mstCountRes] = await Promise.all([
       context.client.query({
-        query: `SELECT uniq(${srcNormExpr}) AS total FROM (${inputSql}) WHERE ${srcNonEmpty}`,
+        query: `SELECT uniq(${srcNormExpr}) AS total FROM (${inputSql}) WHERE ${srcBudgetFilter}`,
         query_params: inputParams,
         format: 'JSONEachRow',
         clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 120, readonly: 1 }),
