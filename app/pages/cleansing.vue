@@ -190,6 +190,12 @@
             </select>
           </label>
         </div>
+        <div v-if="previewIsSampled && sourceReady" class="wb-sample-notice" role="status">
+          <span class="wb-sample-badge">Sampel {{ numberFormat(previewSampleLimit) }} baris</span>
+          <span class="wb-sample-text">
+            Mode pratinjau menggunakan sampel {{ numberFormat(previewSampleLimit) }} baris pertama agar respons cepat; 'Simpan sebagai tabel baru' akan memproses seluruh baris data.
+          </span>
+        </div>
         <div v-if="previewPending" class="wb-data-actions">
           <span class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
         </div>
@@ -682,7 +688,7 @@
 </template>
 
 <script setup lang="ts">
-import type { WorkbenchStep } from '~/composables/useWorkbench'
+import type { WorkbenchPreviewResponse, WorkbenchStep } from '~/composables/useWorkbench'
 
 type Database = { name: string }
 type Table = { name: string; engine?: string }
@@ -691,7 +697,7 @@ type OperationParam = { key: string; label: string; description: string; type: s
 type Operation = { id: string; name: string; description: string; params: OperationParam[] }
 type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; message?: string; warnings?: string[] }
 type PreviewRow = Record<string, unknown>
-type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number; warnings?: string[] }
+type PreviewResponse = WorkbenchPreviewResponse
 type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string; warnings?: string[] }> }
 type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[]; warnings?: string[] }
 type ApplyResponse = {
@@ -776,6 +782,8 @@ const previewPending = ref(false)
 const previewError = ref('')
 const previewRows = ref<PreviewRow[]>([])
 const previewWarnings = ref<string[]>([])
+const previewIsSampled = ref(false)
+const previewSampleLimit = ref(5000)
 const totalRows = ref(0)
 const sqlPending = ref(false)
 const sqlError = ref('')
@@ -826,7 +834,7 @@ const importSummary = ref<{ name: string; valid: number; invalid: number; sugges
 const showMappingDialog = ref(false)
 const columnMappingDraft = reactive<Record<string, string>>({})
 
-let previewController: AbortController | null = null
+let schemaController: AbortController | null = null
 let previewRequest = 0
 let schemaRequest = 0
 let masterColumnsRequest = 0
@@ -1260,16 +1268,20 @@ function changeLimit(event: Event): void {
 
 async function refreshStepSchemas(): Promise<void> {
   const request = ++schemaRequest
+  schemaController?.abort()
+  schemaController = null
   const source = pipeline.value.source
   const steps = pipeline.value.steps
   if (!source.database || !source.table) {
     stepStates.value = []
     return
   }
+  const controller = new AbortController()
+  schemaController = controller
   const statuses: StepState[] = []
   const validPrefix: WorkbenchStep[] = []
   for (let index = 0; index < steps.length; index += 1) {
-    if (request !== schemaRequest) return
+    if (request !== schemaRequest || controller.signal.aborted) return
     stepStates.value = [...statuses, ...steps.slice(index).map(() => ({ status: 'loading' as const }))]
     const step = steps[index]
     if (!step) {
@@ -1280,8 +1292,9 @@ async function refreshStepSchemas(): Promise<void> {
       const response = await $fetch<SchemaResponse>('/api/workbench/schema', {
         method: 'POST',
         body: { source, steps: [...validPrefix, step] },
+        signal: controller.signal,
       })
-      if (request !== schemaRequest) return
+      if (request !== schemaRequest || controller.signal.aborted) return
       if (!response.valid) {
         const rawMessage = response.error || 'Skema langkah tidak valid.'
         const prefix = `Langkah ${validPrefix.length + 1}: `
@@ -1297,12 +1310,13 @@ async function refreshStepSchemas(): Promise<void> {
         warnings: stepWarnings.map((warning) => `Langkah ${index + 1}: ${warning}`),
       })
     } catch (error) {
-      if (request !== schemaRequest) return
+      if (request !== schemaRequest || controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
       const message = getErrorMessage(error, 'Skema langkah tidak dapat diperiksa.')
       statuses.push({ status: 'error', message })
     }
   }
   if (request === schemaRequest) {
+    if (schemaController === controller) schemaController = null
     stepStates.value = statuses
     if (importSummary.value) {
       importSummary.value = {
@@ -1316,18 +1330,16 @@ async function refreshStepSchemas(): Promise<void> {
 
 async function loadPreview(): Promise<void> {
   const request = ++previewRequest
-  previewController?.abort()
-  previewController = null
+  workbench.abortPreview()
   if (!sourceReady.value) {
     previewRows.value = []
     previewWarnings.value = []
+    previewIsSampled.value = false
     totalRows.value = 0
     previewError.value = ''
     previewPending.value = false
     return
   }
-  const controller = new AbortController()
-  previewController = controller
   previewPending.value = true
   previewError.value = ''
   previewRows.value = []
@@ -1341,24 +1353,24 @@ async function loadPreview(): Promise<void> {
       }
     : undefined
   try {
-    const response = await $fetch<PreviewResponse>('/api/workbench/preview', {
-      method: 'POST',
-      body: {
-        source: pipeline.value.source,
-        steps,
-        page: page.value,
-        limit: limit.value,
-        ...(activeFilter ? { displayFilter: activeFilter } : {}),
-      },
-      signal: controller.signal,
+    const result = await workbench.fetchPreview({
+      source: pipeline.value.source,
+      steps,
+      page: page.value,
+      limit: limit.value,
+      ...(activeFilter ? { displayFilter: activeFilter } : {}),
     })
-    if (request !== previewRequest) return
+    if (result.aborted || !result.data || request !== previewRequest) return
+    const response: PreviewResponse = result.data
     previewRows.value = response.rows
     previewWarnings.value = response.warnings ?? []
+    previewIsSampled.value = Boolean(response.isSampled)
+    previewSampleLimit.value = Number(response.sampleLimit ?? 5000) || 5000
     totalRows.value = Number(response.totalRows)
     page.value = response.page
   } catch (error) {
-    if (request !== previewRequest || controller.signal.aborted) return
+    if (request !== previewRequest) return
+    previewIsSampled.value = false
     previewError.value = getErrorMessage(error, 'Pratinjau tidak dapat dimuat.')
   } finally {
     if (request === previewRequest) previewPending.value = false
@@ -1972,6 +1984,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearSavePollTimer()
+  workbench.abortPreview()
+  schemaController?.abort()
+  schemaController = null
 })
 </script>
 
@@ -2840,6 +2855,39 @@ onUnmounted(() => {
 }
 
 .wb-filter-chip span {
+  overflow-wrap: anywhere;
+}
+
+.wb-sample-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 11px;
+  border: 1px solid #c7dcef;
+  border-radius: 9px;
+  color: #2c4358;
+  background: #f4f9fe;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wb-sample-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid #b4d1ec;
+  border-radius: 999px;
+  color: #24507a;
+  background: #e3f0fb;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wb-sample-text {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

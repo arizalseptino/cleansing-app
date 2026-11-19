@@ -567,11 +567,13 @@ const fuzzyMatchMaster: OperationDefinition = {
         query_params: inputParams,
         format: 'JSONEachRow',
         clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 120, readonly: 1 }),
+        ...(context.abortSignal ? { abort_signal: context.abortSignal } : {}),
       }),
       context.client.query({
         query: `SELECT uniq(toString(assumeNotNull(${masterField}))) AS total FROM ${masterIdentifier}${masterFinal} WHERE ${masterNonEmpty}`,
         format: 'JSONEachRow',
         clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 60, readonly: 1 }),
+        ...(context.abortSignal ? { abort_signal: context.abortSignal } : {}),
       }),
     ])
 

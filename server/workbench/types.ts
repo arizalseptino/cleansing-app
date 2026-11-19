@@ -82,6 +82,7 @@ export type OperationContext = {
   getColumnSourceSql?: (column: string) => { sql: string; params: Record<string, unknown> }
   skipHeavyValidation?: boolean
   extractCreatedColumns?: Set<string>
+  abortSignal?: AbortSignal
 }
 
 export type StepSchemaStatus = {

@@ -21,7 +21,34 @@ type StoredPipeline = {
   saveOptions: WorkbenchSaveOptions
 }
 
+export type WorkbenchPreviewDisplayFilter = {
+  column: string
+  kind: 'null' | 'empty' | 'text'
+  value?: string | null
+}
+
+export type WorkbenchPreviewParams = {
+  source: WorkbenchSource
+  steps: WorkbenchStep[]
+  page: number
+  limit: number
+  displayFilter?: WorkbenchPreviewDisplayFilter
+}
+
+export type WorkbenchPreviewResponse = {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  totalRows: number
+  page: number
+  limit: number
+  isSampled?: boolean
+  sampleLimit?: number
+  warnings?: string[]
+  changesRowCount?: boolean
+}
+
 const storageKey = 'bersihdata-workbench-v1'
+let previewAbortController: AbortController | null = null
 
 function defaultSaveOptions(): WorkbenchSaveOptions {
   return {
@@ -150,6 +177,51 @@ export function useWorkbench() {
     persist()
   }
 
+  function abortPreview(): void {
+    if (previewAbortController) {
+      previewAbortController.abort()
+      previewAbortController = null
+    }
+  }
+
+  async function fetchPreview(
+    params: WorkbenchPreviewParams,
+  ): Promise<{ aborted: boolean; data?: WorkbenchPreviewResponse }> {
+    abortPreview()
+    const controller = new AbortController()
+    previewAbortController = controller
+
+    try {
+      const data = await $fetch<WorkbenchPreviewResponse>('/api/workbench/preview', {
+        method: 'POST',
+        body: {
+          source: params.source,
+          steps: params.steps,
+          page: params.page,
+          limit: params.limit,
+          ...(params.displayFilter ? { displayFilter: params.displayFilter } : {}),
+        },
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) {
+        return { aborted: true }
+      }
+      return { aborted: false, data }
+    } catch (error) {
+      if (
+        controller.signal.aborted
+        || (error instanceof Error && error.name === 'AbortError')
+      ) {
+        return { aborted: true }
+      }
+      throw error
+    } finally {
+      if (previewAbortController === controller) {
+        previewAbortController = null
+      }
+    }
+  }
+
   return {
     pipeline,
     selectedStep,
@@ -160,5 +232,7 @@ export function useWorkbench() {
     setSource,
     setSaveOptions,
     savePipeline,
+    abortPreview,
+    fetchPreview,
   }
 }

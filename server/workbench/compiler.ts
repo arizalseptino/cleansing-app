@@ -50,12 +50,14 @@ async function resolveSchema(
   client: ReturnType<typeof useClickHouse>,
   sql: string,
   params: Record<string, unknown>,
+  abortSignal?: AbortSignal,
 ): Promise<ColumnMetadata[]> {
   const result = await client.query({
     query: `SELECT * FROM (${sql}) LIMIT 0`,
     query_params: params,
     format: 'JSON',
     clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 60, readonly: 1 }),
+    ...(abortSignal ? { abort_signal: abortSignal } : {}),
   })
   const json = await result.json<{ meta?: Array<{ name: string; type: string }> }>()
   const meta = json.meta ?? []
@@ -74,6 +76,8 @@ export async function compilePipeline(
     includeSourceColumns?: string[]
     metadataOverride?: { engine: string; sorting_key: string }
     skipHeavyValidation?: boolean
+    sourceLimit?: number
+    abortSignal?: AbortSignal
   } = {},
 ): Promise<CompiledPipeline> {
   if (!pipeline || !pipeline.source || !pipeline.source.database || !pipeline.source.table) {
@@ -114,7 +118,13 @@ export async function compilePipeline(
       })
     }
   }
-  const initialSql = buildInputSql(pipeline.source)
+  const baseInputSql = buildInputSql(pipeline.source)
+  const sourceLimit = options.sourceLimit !== undefined
+    && Number.isSafeInteger(options.sourceLimit)
+    && options.sourceLimit > 0
+    ? options.sourceLimit
+    : undefined
+  const initialSql = sourceLimit ? `${baseInputSql} LIMIT ${sourceLimit}` : baseInputSql
   let currentSql = sourceColumns.length
     ? `SELECT *, ${sourceColumns.map((column) => `${quoteIdentifier(column)} AS ${quoteIdentifier(`__sumber_${column}`)}`).join(', ')} FROM (${initialSql})`
     : initialSql
@@ -192,6 +202,7 @@ export async function compilePipeline(
         getColumnSourceSql,
         skipHeavyValidation: options.skipHeavyValidation,
         extractCreatedColumns,
+        abortSignal: options.abortSignal,
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)
@@ -235,7 +246,7 @@ export async function compilePipeline(
       const nextSql = stepSql.replace(/__INPUT__/g, `(${inputSql})`)
       currentSql = nextSql
 
-      schema = await resolveSchema(client, currentSql, boundParams)
+      schema = await resolveSchema(client, currentSql, boundParams, options.abortSignal)
       const writeColumns = [...new Set([...stepTouchedColumns, ...stepAddedColumns])]
       const requiresFullHistory = (step.op === 'add_column' && step.params?.kind === 'sequence')
         || step.op === 'fuzzy_match_master'
