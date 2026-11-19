@@ -37,6 +37,7 @@ export default defineEventHandler(async (event) => {
       detectedDelimiter: inspection.detectedDelimiter,
       rawHeaders: inspection.rawHeaders,
       suggestedColumns: inspection.suggestedColumns,
+      suggestedTypes: inspection.suggestedTypes,
       previewRows: inspection.previewRows,
       rowCount: inspection.rowCount,
       columnCount: inspection.columnCount,

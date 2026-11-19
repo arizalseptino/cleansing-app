@@ -950,12 +950,84 @@ function castValue(value: unknown, targetType: string, strict: boolean): unknown
     if (['false', '0'].includes(low)) return false
     return strict ? null : false
   }
+  if (/^Date$/i.test(base)) {
+    const parsed = parseMockIsoDate(str)
+    if (parsed) return parsed
+    return strict ? null : '1970-01-01'
+  }
   if (/^DateTime/i.test(base)) {
     const d = new Date(str)
     if (Number.isNaN(d.getTime())) return strict ? null : str
     return d.toISOString()
   }
   return str
+}
+
+function parseMockIsoDate(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null
+  const s = String(raw).trim()
+  if (!s) return null
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(s)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const d = new Date(Date.UTC(year, month - 1, day))
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    return null
+  }
+  const iso = `${match[1]}-${match[2]}-${match[3]}`
+  return iso >= '1970-01-01' && iso <= '2149-06-06' ? iso : null
+}
+
+function parseMockDateTimeBestEffort(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null
+  const s = String(raw).trim()
+  if (!s) return null
+  const iso = parseMockIsoDate(s)
+  if (iso) return `${iso} 00:00:00`
+
+  const slashYmd = /^(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s)
+  if (slashYmd) {
+    const candidate = `${slashYmd[1]}-${slashYmd[2].padStart(2, '0')}-${slashYmd[3].padStart(2, '0')}`
+    const valid = parseMockIsoDate(candidate)
+    return valid ? `${valid} 00:00:00` : null
+  }
+
+  const dmy = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/.exec(s)
+  if (dmy) {
+    const dayNum = Number(dmy[1])
+    const monthNum = Number(dmy[2])
+    const yearNum = Number(dmy[3])
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      const candidate = `${String(yearNum).padStart(4, '0')}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+      const valid = parseMockIsoDate(candidate)
+      return valid ? `${valid} 00:00:00` : null
+    }
+  }
+
+  if (/[A-Za-z]/.test(s)) {
+    const parsed = new Date(s)
+    if (!Number.isNaN(parsed.getTime())) {
+      const isoPart = parsed.toISOString().slice(0, 10)
+      if (isoPart >= '1970-01-01' && isoPart <= '2149-06-06') {
+        return `${isoPart} 00:00:00`
+      }
+    }
+  }
+  return null
+}
+
+function defaultValueForMockType(type: string): unknown {
+  if (/^(Nullable|LowCardinality)\(/i.test(type)) {
+    if (/^Nullable\(/i.test(type)) return null
+  }
+  const base = type.replace(/^(Nullable|LowCardinality)\((.*)\)$/i, '$2').trim()
+  if (/^(UInt|Int)\d+$/i.test(base) || /^Float\d+$/i.test(base)) return 0
+  if (/^Date$/i.test(base)) return '1970-01-01'
+  if (/^Bool/i.test(base)) return false
+  return ''
 }
 
 function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
@@ -970,10 +1042,23 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
   if (expr.kind === 'call') {
     const fn = expr.name.toLowerCase()
     if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniq' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64') return 'UInt64'
+    if (fn === 'toint64') return 'Int64'
+    if (fn === 'toint64ornull') return 'Nullable(Int64)'
+    if (fn === 'tofloat64ornull') return 'Nullable(Float64)'
+    if (fn === 'todateornull') return 'Nullable(Date)'
+    if (fn === 'parsedatetimebesteffortornull') return 'Nullable(DateTime)'
+    if (fn === 'todate') {
+      const argType = expr.args[0] ? inferExprType(expr.args[0], inputColumns) : 'String'
+      return argType.startsWith('Nullable(') ? 'Nullable(Date)' : 'Date'
+    }
     if (fn === 'isnull' || fn === 'notempty' || fn === 'empty' || fn === 'startswith' || fn === 'match' || fn === 'touint8') return 'UInt8'
     if (fn === 'position' || fn === 'positioncaseinsensitiveutf8' || fn === 'lengthutf8' || fn === 'length') return 'UInt64'
     if (fn === 'jarowinklersimilarity' || fn === 'tofloat64' || fn === 'greatest' || fn === 'least') return 'Float64'
     if (fn === 'cast' && expr.args[1]?.kind === 'literal') return String(expr.args[1].value)
+    if (fn === 'ifnull' && expr.args.length >= 2) {
+      const t2 = inferExprType(expr.args[1], inputColumns)
+      return t2
+    }
     if (fn === 'if' && expr.args.length >= 3) {
       const t1 = inferExprType(expr.args[1], inputColumns)
       const t2 = inferExprType(expr.args[2], inputColumns)
@@ -1313,9 +1398,32 @@ export class MockClickHouseClient {
       const v = this.evalExpr(args[0], row, ctes)
       return v === null || v === undefined ? 0 : Number(v)
     }
+    if (fn === 'tofloat64ornull') {
+      const v = this.evalExpr(args[0], row, ctes)
+      if (v === null || v === undefined) return null
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null
+      const s = String(v).trim()
+      if (!s || !/^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(s)) return null
+      const n = Number(s)
+      return Number.isFinite(n) ? n : null
+    }
     if (fn === 'touint8' || fn === 'touint64' || fn === 'toint64') {
       const v = this.evalExpr(args[0], row, ctes)
       return v === null || v === undefined ? 0 : Math.trunc(Number(v))
+    }
+    if (fn === 'toint64ornull') {
+      const v = this.evalExpr(args[0], row, ctes)
+      if (v === null || v === undefined) return null
+      if (typeof v === 'number') return Number.isSafeInteger(v) ? v : null
+      const s = String(v).trim()
+      if (!/^-?\d+$/.test(s)) return null
+      try {
+        const b = BigInt(s)
+        if (b < -9223372036854775808n || b > 9223372036854775807n) return null
+        return Number.isSafeInteger(Number(s)) ? Number(s) : s
+      } catch {
+        return null
+      }
     }
     if (fn === 'abs') {
       const v = this.evalExpr(args[0], row, ctes)
@@ -1464,6 +1572,20 @@ export class MockClickHouseClient {
       const val = this.evalExpr(args[0], row, ctes)
       if (typeof val === 'number') return new Date(val * 1000).toISOString()
       return String(val ?? '')
+    }
+    if (fn === 'todateornull') {
+      const val = this.evalExpr(args[0], row, ctes)
+      return parseMockIsoDate(val)
+    }
+    if (fn === 'parsedatetimebesteffortornull') {
+      const val = this.evalExpr(args[0], row, ctes)
+      return parseMockDateTimeBestEffort(val)
+    }
+    if (fn === 'todate') {
+      const val = this.evalExpr(args[0], row, ctes)
+      if (val === null || val === undefined) return null
+      if (val === 0) return '1970-01-01'
+      return parseMockIsoDate(val) ?? '1970-01-01'
     }
     return null
   }
@@ -2223,7 +2345,16 @@ export class MockClickHouseClient {
       const ast = selectParser.parseQuery()
       const res = this.evalQuery(ast)
       for (const r of res.rows) {
-        tbl.rows.push({ ...r })
+        const record: Record<string, unknown> = {}
+        for (const col of tbl.columns) {
+          record[col.name] = defaultValueForMockType(col.type)
+        }
+        colNames.forEach((colName, idx) => {
+          const sourceKey = res.columns[idx]?.name ?? colName
+          const val = sourceKey in r ? r[sourceKey] : r[colName]
+          record[colName] = val === undefined ? record[colName] : val
+        })
+        tbl.rows.push(record)
       }
     }
   }
@@ -2318,13 +2449,23 @@ export class MockClickHouseClient {
       }
     }
 
+    const nullRep = clickhouse_settings.format_csv_null_representation !== undefined
+      ? String(clickhouse_settings.format_csv_null_representation)
+      : '\\N'
+
     for (const row of dataRows) {
       const record: Record<string, unknown> = {}
       for (const col of tbl.columns) {
-        record[col.name] = col.type.startsWith('Nullable(') ? null : ''
+        record[col.name] = defaultValueForMockType(col.type)
       }
       targetColumns.forEach((colName, idx) => {
-        record[colName] = row[idx] ?? ''
+        const rawVal = row[idx] ?? ''
+        const colDef = tbl.columns.find((c) => c.name === colName)
+        if (colDef && colDef.type.startsWith('Nullable(') && rawVal === nullRep) {
+          record[colName] = null
+        } else {
+          record[colName] = rawVal
+        }
       })
       tbl.rows.push(record)
     }

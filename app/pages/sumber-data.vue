@@ -269,7 +269,12 @@
           </div>
           <div>
             <dt>Jumlah kolom</dt>
-            <dd>{{ formatIdNumber(ingestCommitResult.columns.length) }} (semua bertipe <code>Nullable(String)</code>)</dd>
+            <dd>
+              {{ formatIdNumber(ingestCommitResult.columns.length) }} kolom
+              <span v-if="ingestCommitResult.columnTypes?.length" class="ingest-result-types">
+                ({{ summarizeColumnTypes(ingestCommitResult.columnTypes) }})
+              </span>
+            </dd>
           </div>
           <div>
             <dt>Durasi</dt>
@@ -501,9 +506,9 @@
             </div>
 
             <div class="ingest-columns-editor">
-              <h4>Nama kolom hasil (dapat diubah)</h4>
+              <h4>Pemetaan nama &amp; tipe kolom hasil (otomatis terdeteksi dari sampel, dapat diubah)</h4>
               <div class="ingest-columns-grid">
-                <label
+                <div
                   v-for="(rawHeader, colIdx) in ingestInspection.rawHeaders"
                   :key="colIdx"
                   class="ingest-col-field"
@@ -518,7 +523,23 @@
                     :disabled="ingestCommitPending"
                     :aria-label="`Nama kolom untuk ${rawHeader || `kolom ${colIdx + 1}`}`"
                   />
-                </label>
+                  <select
+                    v-model="ingestColumnTypes[colIdx]"
+                    :disabled="ingestCommitPending"
+                    :aria-label="`Tipe data untuk ${ingestEditedColumns[colIdx] || rawHeader || `kolom ${colIdx + 1}`}`"
+                  >
+                    <option v-for="colType in supportedColumnTypes" :key="colType" :value="colType">
+                      {{ colType }}
+                    </option>
+                  </select>
+                  <small class="ingest-col-type-hint">
+                    {{
+                      ingestColumnTypes[colIdx] === ingestInspection.suggestedTypes[colIdx]
+                        ? `Terdeteksi: ${ingestInspection.suggestedTypes[colIdx]}`
+                        : `Otomatis: ${ingestInspection.suggestedTypes[colIdx]}`
+                    }}
+                  </small>
+                </div>
               </div>
               <p v-if="ingestColumnValidationError" class="source-message source-error" role="alert">
                 {{ ingestColumnValidationError }}
@@ -534,7 +555,7 @@
                   <tr>
                     <th v-for="(colName, colIdx) in ingestEditedColumns" :key="colIdx" scope="col">
                       <span :title="colName">{{ colName || `kolom_${colIdx + 1}` }}</span>
-                      <small>Nullable(String)</small>
+                      <small>{{ ingestColumnTypes[colIdx] || 'Nullable(String)' }}</small>
                     </th>
                   </tr>
                 </thead>
@@ -594,13 +615,13 @@
               <p>
                 Ringkasan: membuat tabel baru
                 <code>{{ ingestTargetDatabase || '...' }}.{{ ingestTargetTable.trim() || '...' }}</code>
-                dengan <strong>{{ formatIdNumber(ingestInspection.columnCount) }}</strong> kolom bertipe
-                <code>Nullable(String)</code> dan memuat
+                dengan <strong>{{ formatIdNumber(ingestInspection.columnCount) }}</strong> kolom
+                ({{ summarizeColumnTypes(ingestColumnTypes) }}) dan memuat
                 <strong>{{ formatIdNumber(ingestInspection.rowCount) }}</strong> baris data dari
                 <strong>{{ ingestInspection.sourceLabel }}</strong>.
               </p>
               <p class="ingest-empty-note">
-                Catatan: nilai kosong dimuat apa adanya sebagai string kosong; gunakan operasi &ldquo;Rapikan teks&rdquo; (ubah string kosong menjadi NULL) di ruang kerja bila perlu.
+                Catatan: nilai kosong (<code>''</code>, <code>NULL</code>, <code>-</code>) pada kolom numerik/tanggal dikonversi aman ke <code>NULL</code> (jika Nullable) atau nilai bawaan agar baris kotor tidak menggagalkan impor; nilai kosong pada kolom teks tetap dimuat apa adanya.
               </p>
             </div>
 
@@ -922,6 +943,27 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+type SupportedColumnType =
+  | 'Int64'
+  | 'Nullable(Int64)'
+  | 'Float64'
+  | 'Nullable(Float64)'
+  | 'String'
+  | 'Nullable(String)'
+  | 'Date'
+  | 'Nullable(Date)'
+
+const supportedColumnTypes: SupportedColumnType[] = [
+  'Int64',
+  'Nullable(Int64)',
+  'Float64',
+  'Nullable(Float64)',
+  'String',
+  'Nullable(String)',
+  'Date',
+  'Nullable(Date)',
+]
+
 type IngestInspectResponse = {
   uploadId?: string | null
   mode: 'file' | 'text'
@@ -930,6 +972,7 @@ type IngestInspectResponse = {
   detectedDelimiter: ',' | ';' | '\t' | '|'
   rawHeaders: string[]
   suggestedColumns: string[]
+  suggestedTypes: SupportedColumnType[]
   previewRows: string[][]
   rowCount: number
   columnCount: number
@@ -941,6 +984,7 @@ type IngestCommitResponse = {
   sourceLabel: string
   delimiter: string
   columns: string[]
+  columnTypes?: SupportedColumnType[]
   rows: number
   durationMs: number
   verification: string
@@ -962,6 +1006,7 @@ const ingestPastedText = ref('')
 const ingestDelimiter = ref<string>('auto')
 const ingestInspection = ref<IngestInspectResponse | null>(null)
 const ingestEditedColumns = ref<string[]>([])
+const ingestColumnTypes = ref<SupportedColumnType[]>([])
 const ingestTargetDatabase = ref('')
 const ingestTargetTable = ref('')
 const ingestInspectPending = ref(false)
@@ -973,10 +1018,23 @@ const ingestCommitResult = ref<IngestCommitResponse | null>(null)
 const pastedTextBytes = computed(() => new TextEncoder().encode(ingestPastedText.value).length)
 const isValidTargetTableName = computed(() => newTableNamePattern.test(ingestTargetTable.value.trim()))
 
+function summarizeColumnTypes(types: string[]): string {
+  if (!types.length) return 'belum ada kolom'
+  const nonNullableCount = types.filter((t) => !t.startsWith('Nullable(')).length
+  const nullableCount = types.length - nonNullableCount
+  const parts: string[] = []
+  if (nonNullableCount > 0) parts.push(`${nonNullableCount} non-nullable`)
+  if (nullableCount > 0) parts.push(`${nullableCount} nullable`)
+  return parts.join(', ')
+}
+
 const ingestColumnValidationError = computed(() => {
   if (!ingestInspection.value) return ''
   if (ingestEditedColumns.value.length !== ingestInspection.value.columnCount) {
     return 'Jumlah nama kolom tidak sesuai dengan data.'
+  }
+  if (ingestColumnTypes.value.length !== ingestInspection.value.columnCount) {
+    return 'Jumlah tipe data kolom tidak sesuai dengan data.'
   }
   const seen = new Set<string>()
   for (let i = 0; i < ingestEditedColumns.value.length; i += 1) {
@@ -988,6 +1046,9 @@ const ingestColumnValidationError = computed(() => {
       return `Nama kolom "${col}" duplikat. Setiap kolom harus unik.`
     }
     seen.add(col)
+    if (!supportedColumnTypes.includes(ingestColumnTypes.value[i]!)) {
+      return `Tipe data kolom "${col}" tidak didukung.`
+    }
   }
   return ''
 })
@@ -1050,6 +1111,7 @@ function openIngestModal() {
   ingestDelimiter.value = 'auto'
   ingestInspection.value = null
   ingestEditedColumns.value = []
+  ingestColumnTypes.value = []
   ingestTargetDatabase.value = selectedDatabase.value ?? databases.value[0]?.name ?? ''
   ingestTargetTable.value = ''
   ingestInspectPending.value = false
@@ -1079,6 +1141,7 @@ function switchIngestMode(nextMode: 'file' | 'text') {
   ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
+  ingestColumnTypes.value = []
   ingestInspectError.value = ''
   ingestCommitError.value = ''
   ingestDelimiter.value = 'auto'
@@ -1089,6 +1152,7 @@ function resetInspectionOnEdit() {
   ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
+  ingestColumnTypes.value = []
   ingestInspectError.value = ''
   ingestCommitError.value = ''
   ingestDelimiter.value = 'auto'
@@ -1137,6 +1201,7 @@ function processSelectedFile(file: File) {
   ingestUploadProgress.value = null
   ingestInspection.value = null
   ingestEditedColumns.value = []
+  ingestColumnTypes.value = []
   ingestInspectError.value = ''
   ingestCommitError.value = ''
   ingestDelimiter.value = 'auto'
@@ -1277,12 +1342,16 @@ async function runIngestInspect(autoDelimiter = false) {
     ingestInspection.value = response
     ingestDelimiter.value = response.delimiter
     ingestEditedColumns.value = [...response.suggestedColumns]
+    ingestColumnTypes.value = Array.isArray(response.suggestedTypes) && response.suggestedTypes.length === response.columnCount
+      ? [...response.suggestedTypes]
+      : Array.from({ length: response.columnCount }, () => 'Nullable(String)')
     if (!ingestTargetDatabase.value) {
       ingestTargetDatabase.value = selectedDatabase.value ?? databases.value[0]?.name ?? ''
     }
   } catch (error) {
     ingestInspection.value = null
     ingestEditedColumns.value = []
+    ingestColumnTypes.value = []
     ingestInspectError.value = getErrorMessage(error, 'Data tidak dapat diperiksa sebagai CSV/TSV yang valid.')
   } finally {
     ingestInspectPending.value = false
@@ -1296,6 +1365,7 @@ async function submitIngestCommit() {
   ingestCommitPending.value = true
   ingestCommitError.value = ''
   const trimmedColumns = ingestEditedColumns.value.map((col) => col.trim())
+  const selectedColumnTypes = [...ingestColumnTypes.value]
   const trimmedTable = ingestTargetTable.value.trim()
 
   try {
@@ -1312,6 +1382,7 @@ async function submitIngestCommit() {
               targetDatabase: ingestTargetDatabase.value,
               tableName: trimmedTable,
               columns: trimmedColumns,
+              columnTypes: selectedColumnTypes,
             },
           })
         } catch (err) {
@@ -1323,6 +1394,7 @@ async function submitIngestCommit() {
             formData.append('targetDatabase', ingestTargetDatabase.value)
             formData.append('tableName', trimmedTable)
             formData.append('columns', JSON.stringify(trimmedColumns))
+            formData.append('columnTypes', JSON.stringify(selectedColumnTypes))
             response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
               method: 'POST',
               body: formData,
@@ -1338,6 +1410,7 @@ async function submitIngestCommit() {
         formData.append('targetDatabase', ingestTargetDatabase.value)
         formData.append('tableName', trimmedTable)
         formData.append('columns', JSON.stringify(trimmedColumns))
+        formData.append('columnTypes', JSON.stringify(selectedColumnTypes))
         response = await $fetch<IngestCommitResponse>('/api/ingest/commit', {
           method: 'POST',
           body: formData,
@@ -1353,6 +1426,7 @@ async function submitIngestCommit() {
           targetDatabase: ingestTargetDatabase.value,
           tableName: trimmedTable,
           columns: trimmedColumns,
+          columnTypes: selectedColumnTypes,
         },
       })
     }
@@ -2197,6 +2271,7 @@ onMounted(loadDatabases)
 .ingest-input-panel textarea,
 .ingest-inline-field select,
 .ingest-col-field input,
+.ingest-col-field select,
 .ingest-target-field select,
 .ingest-target-field input {
   width: 100%;
@@ -2258,9 +2333,9 @@ onMounted(loadDatabases)
 
 .ingest-columns-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
   gap: 8px;
-  max-height: 220px;
+  max-height: 260px;
   overflow: auto;
   padding: 10px;
   border: 1px solid var(--warna-garis);
@@ -2274,6 +2349,16 @@ onMounted(loadDatabases)
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ingest-col-type-hint {
+  color: var(--warna-redup);
+  font-size: 11px;
+}
+
+.ingest-result-types {
+  color: var(--warna-redup);
+  font-size: 13px;
 }
 
 .ingest-preview-viewport {

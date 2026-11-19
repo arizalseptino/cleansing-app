@@ -15,6 +15,8 @@ import { validateDatabase } from './metadata'
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024
 export const MAX_COLUMNS = 200
 export const PREVIEW_ROW_LIMIT = 20
+export const INFERENCE_SAMPLE_ROW_LIMIT = 1000
+export const MAX_INFERENCE_SAMPLE_BYTES = 4 * 1024 * 1024
 export const BATCH_MAX_BYTES = 8 * 1024 * 1024
 export const BATCH_MAX_ROWS = 50_000
 export const STREAM_CHUNK_BYTES = 64 * 1024
@@ -23,6 +25,18 @@ const STAGED_UPLOAD_TTL_MS = 30 * 60 * 1000
 export const ALLOWED_EXTENSIONS = new Set(['.csv', '.tsv', '.txt'])
 export const SUPPORTED_DELIMITERS = [',', ';', '\t', '|'] as const
 export type SupportedDelimiter = (typeof SUPPORTED_DELIMITERS)[number]
+
+export const SUPPORTED_COLUMN_TYPES = [
+  'Int64',
+  'Nullable(Int64)',
+  'Float64',
+  'Nullable(Float64)',
+  'String',
+  'Nullable(String)',
+  'Date',
+  'Nullable(Date)',
+] as const
+export type SupportedColumnType = (typeof SUPPORTED_COLUMN_TYPES)[number]
 
 export const NEW_TABLE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 export const COLUMN_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
@@ -40,6 +54,7 @@ export type IngestRequestPayload =
       targetDatabase: string
       tableName: string
       columns: string[] | null
+      columnTypes: string[] | null
     }
   | {
       mode: 'text'
@@ -50,6 +65,7 @@ export type IngestRequestPayload =
       targetDatabase: string
       tableName: string
       columns: string[] | null
+      columnTypes: string[] | null
     }
 
 export type CsvInspectionResult = {
@@ -57,6 +73,7 @@ export type CsvInspectionResult = {
   detectedDelimiter: SupportedDelimiter
   rawHeaders: string[]
   suggestedColumns: string[]
+  suggestedTypes: SupportedColumnType[]
   previewRows: string[][]
   rowCount: number
   columnCount: number
@@ -307,6 +324,145 @@ export function validateTargetColumns(columns: unknown, expectedCount: number): 
   return validated
 }
 
+const SUPPORTED_COLUMN_TYPE_SET = new Set<string>(SUPPORTED_COLUMN_TYPES)
+const INT64_MIN = -9223372036854775808n
+const INT64_MAX = 9223372036854775807n
+
+export function isCsvEmptyOrNullLiteral(raw: string): boolean {
+  const trimmed = raw.trim()
+  return (
+    trimmed === ''
+    || trimmed === '-'
+    || trimmed === '\\N'
+    || trimmed.toLowerCase() === 'null'
+  )
+}
+
+export function isPureInt64Literal(trimmed: string): boolean {
+  if (!/^(?:0|-?[1-9]\d*)$/.test(trimmed)) return false
+  try {
+    const val = BigInt(trimmed)
+    return val >= INT64_MIN && val <= INT64_MAX
+  } catch {
+    return false
+  }
+}
+
+export function isFloat64Literal(trimmed: string): boolean {
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(trimmed)) return false
+  const num = Number(trimmed)
+  return Number.isFinite(num)
+}
+
+export function isIsoDateLiteral(trimmed: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false
+  const d = new Date(Date.UTC(year, month - 1, day))
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    return false
+  }
+  // ClickHouse Date (16-bit) valid range is 1970-01-01 .. 2149-06-06
+  return trimmed >= '1970-01-01' && trimmed <= '2149-06-06'
+}
+
+export function isKeyCandidateColumn(suggestedName: string, rawHeader: string): boolean {
+  const candidates = [suggestedName.trim().toLowerCase(), rawHeader.trim().toLowerCase()]
+  return candidates.some((name) => (
+    name === 'id'
+    || /^id_[a-z0-9_]+$/.test(name)
+    || /^[a-z0-9_]+_id$/.test(name)
+    || /^(?:kode|code|key|sku|uuid|guid)$/.test(name)
+    || /^[a-z0-9_]+_(?:key)$/.test(name)
+    || /^key_[a-z0-9_]+$/.test(name)
+    || /^(?:kode|code)_(?:trx|transaksi|unik|pelanggan|produk|barang|cabang|referensi)$/.test(name)
+    || /^(?:no|nomor)_(?:transaksi|faktur|invoice|order|trx|referensi)$/.test(name)
+  ))
+}
+
+export function inferColumnTypes(
+  suggestedColumns: string[],
+  rawHeaders: string[],
+  sampleRows: string[][],
+): SupportedColumnType[] {
+  return suggestedColumns.map((colName, colIdx) => {
+    let hasEmptyOrNull = false
+    let nonEmptyCount = 0
+    let allInt = true
+    let allFloat = true
+    let allDate = true
+
+    for (const row of sampleRows) {
+      const raw = String(row[colIdx] ?? '')
+      if (isCsvEmptyOrNullLiteral(raw)) {
+        hasEmptyOrNull = true
+        continue
+      }
+
+      const trimmed = raw.trim()
+      nonEmptyCount += 1
+
+      if (allInt && !isPureInt64Literal(trimmed)) {
+        allInt = false
+      }
+      if (allFloat && !isFloat64Literal(trimmed)) {
+        allFloat = false
+      }
+      if (allDate && !isIsoDateLiteral(trimmed)) {
+        allDate = false
+      }
+    }
+
+    if (nonEmptyCount === 0) {
+      return 'Nullable(String)'
+    }
+
+    if (allInt) {
+      return hasEmptyOrNull ? 'Nullable(Int64)' : 'Int64'
+    }
+
+    if (allFloat) {
+      return hasEmptyOrNull ? 'Nullable(Float64)' : 'Float64'
+    }
+
+    if (allDate) {
+      return hasEmptyOrNull ? 'Nullable(Date)' : 'Date'
+    }
+
+    if (!hasEmptyOrNull && isKeyCandidateColumn(colName, rawHeaders[colIdx] ?? '')) {
+      return 'String'
+    }
+
+    return 'Nullable(String)'
+  })
+}
+
+export function validateTargetColumnTypes(types: unknown, expectedCount: number): SupportedColumnType[] {
+  if (!Array.isArray(types)) {
+    ingestError('Daftar tipe data kolom wajib dikirim.', 400)
+  }
+  if (types.length !== expectedCount) {
+    ingestError(`Jumlah tipe data kolom (${types.length}) tidak sama dengan jumlah kolom data (${expectedCount}).`, 400)
+  }
+
+  const validated: SupportedColumnType[] = []
+  for (let i = 0; i < types.length; i += 1) {
+    const raw = typeof types[i] === 'string' ? types[i].trim() : ''
+    if (!SUPPORTED_COLUMN_TYPE_SET.has(raw)) {
+      ingestError(
+        `Tipe data kolom ke-${i + 1} ("${raw || '(kosong)'}") tidak didukung.`,
+        400,
+      )
+    }
+    validated.push(raw as SupportedColumnType)
+  }
+
+  return validated
+}
+
 export function validateNewTableName(rawName: unknown): string {
   if (typeof rawName !== 'string' || !rawName.trim()) {
     ingestError('Nama tabel baru wajib diisi.', 400)
@@ -393,15 +549,18 @@ export function inspectCsvPayload(
   }
 
   const suggestedColumns = sanitizeColumnNames(rawHeaders)
-  const previewRows = dataRows
-    .slice(0, PREVIEW_ROW_LIMIT)
+  const sampleRows = dataRows
+    .slice(0, INFERENCE_SAMPLE_ROW_LIMIT)
     .map((row) => row.map((cell) => String(cell ?? '')))
+  const suggestedTypes = inferColumnTypes(suggestedColumns, rawHeaders, sampleRows)
+  const previewRows = sampleRows.slice(0, PREVIEW_ROW_LIMIT)
 
   return {
     delimiter,
     detectedDelimiter,
     rawHeaders,
     suggestedColumns,
+    suggestedTypes,
     previewRows,
     rowCount: dataRows.length,
     columnCount: expectedCols,
@@ -512,6 +671,7 @@ export async function inspectCsvFile(
 
   const headChunks: Buffer[] = []
   let collectingHead = true
+  let headCollectedBytes = 0
   let headPendingEmptyBuffers: Buffer[] = []
 
   const commitLogicalRecord = (cols: number, isEmptyLine: boolean, recordSliceForHead: Buffer | null) => {
@@ -540,7 +700,10 @@ export async function inspectCsvFile(
         }
       }
       if (collectingHead && headPendingEmptyBuffers.length > 0) {
-        headChunks.push(...headPendingEmptyBuffers)
+        for (const pendingBuf of headPendingEmptyBuffers) {
+          headChunks.push(pendingBuf)
+          headCollectedBytes += pendingBuf.length
+        }
       }
       pendingEmptyLines = 0
       headPendingEmptyBuffers = []
@@ -565,7 +728,11 @@ export async function inspectCsvFile(
 
     if (collectingHead && recordSliceForHead) {
       headChunks.push(recordSliceForHead)
-      if (totalRecords > PREVIEW_ROW_LIMIT) {
+      headCollectedBytes += recordSliceForHead.length
+      if (
+        totalRecords > INFERENCE_SAMPLE_ROW_LIMIT
+        || (totalRecords > PREVIEW_ROW_LIMIT && headCollectedBytes >= MAX_INFERENCE_SAMPLE_BYTES)
+      ) {
         collectingHead = false
       }
     }
@@ -696,7 +863,9 @@ export async function inspectCsvFile(
     }
 
     if (collectingHead && recordStartIdx < buf.length) {
-      headChunks.push(Buffer.from(buf.subarray(recordStartIdx)))
+      const tailSlice = Buffer.from(buf.subarray(recordStartIdx))
+      headChunks.push(tailSlice)
+      headCollectedBytes += tailSlice.length
     }
   }
 
@@ -709,7 +878,10 @@ export async function inspectCsvFile(
     }
     hasAnyNonEmptyContent = true
     currentRecordHasContent = true
-    if (collectingHead) headChunks.push(bomState.bomBuffer)
+    if (collectingHead) {
+      headChunks.push(bomState.bomBuffer)
+      headCollectedBytes += bomState.bomBuffer.length
+    }
   }
 
   try {
@@ -772,15 +944,18 @@ export async function inspectCsvFile(
   }
 
   const suggestedColumns = sanitizeColumnNames(rawHeaders)
-  const previewRows = headRows
-    .slice(1, 1 + PREVIEW_ROW_LIMIT)
+  const sampleRows = headRows
+    .slice(1, 1 + INFERENCE_SAMPLE_ROW_LIMIT)
     .map((row) => row.map((cell) => String(cell ?? '')))
+  const suggestedTypes = inferColumnTypes(suggestedColumns, rawHeaders, sampleRows)
+  const previewRows = sampleRows.slice(0, PREVIEW_ROW_LIMIT)
 
   return {
     delimiter,
     detectedDelimiter,
     rawHeaders,
     suggestedColumns,
+    suggestedTypes,
     previewRows,
     rowCount: Math.max(0, totalRecords - 1),
     columnCount: rawHeaders.length,
@@ -1525,6 +1700,17 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
         ingestError('Daftar nama kolom hasil tidak valid.', 400)
       }
     }
+    const columnTypesRaw = fields.get('columnTypes')
+    let parsedColumnTypes: string[] | null = null
+    if (columnTypesRaw !== undefined && columnTypesRaw.trim() !== '') {
+      try {
+        const jsonVal: unknown = JSON.parse(columnTypesRaw)
+        parsedColumnTypes = Array.isArray(jsonVal) ? jsonVal.map((item) => String(item ?? '')) : null
+      } catch {
+        if (filePart) safeUnlink(filePart.tempFilePath)
+        ingestError('Daftar tipe data kolom tidak valid.', 400)
+      }
+    }
 
     if (filePart) {
       if (filePart.byteSize === 0) {
@@ -1542,6 +1728,7 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
         targetDatabase,
         tableName,
         columns: parsedColumns,
+        columnTypes: parsedColumnTypes,
       }
     }
 
@@ -1560,6 +1747,7 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
       targetDatabase,
       tableName,
       columns: parsedColumns,
+      columnTypes: parsedColumnTypes,
     }
   }
 
@@ -1580,6 +1768,9 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
   const columns = Array.isArray(body.columns)
     ? body.columns.map((item) => String(item ?? ''))
     : null
+  const columnTypes = Array.isArray(body.columnTypes)
+    ? body.columnTypes.map((item) => String(item ?? ''))
+    : null
 
   if (typeof body.uploadId === 'string' && body.uploadId.trim()) {
     const staged = getStagedUpload(body.uploadId.trim())
@@ -1596,6 +1787,7 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
       targetDatabase,
       tableName,
       columns,
+      columnTypes,
     }
   }
 
@@ -1613,6 +1805,7 @@ export async function readIngestPayload(event: H3Event): Promise<IngestRequestPa
     targetDatabase,
     tableName,
     columns,
+    columnTypes,
   }
 }
 

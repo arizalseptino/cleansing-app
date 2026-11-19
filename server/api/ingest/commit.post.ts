@@ -16,10 +16,42 @@ import {
   sanitizeIngestErrorMessage,
   streamCsvBatchesFromBuffer,
   streamCsvBatchesFromFile,
+  type SupportedColumnType,
   validateNewTableName,
+  validateTargetColumnTypes,
   validateTargetColumns,
 } from '../../features/ingest-csv'
 import { createMergeTreeTableSafe, quoteIdentifier } from '../../features/metadata'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
+
+function buildSafeTypedSelectExpr(colSql: string, colType: SupportedColumnType): string {
+  if (colType === 'Nullable(String)') {
+    return `${colSql} AS ${colSql}`
+  }
+  if (colType === 'String') {
+    return `ifNull(${colSql}, '') AS ${colSql}`
+  }
+
+  const rawTextExpr = `trimBoth(ifNull(${colSql}, ''))`
+  const isEmptyOrNullExpr = `lowerUTF8(${rawTextExpr}) IN ('', '-', 'null')`
+
+  if (colType === 'Nullable(Int64)') {
+    return `if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Int64)'), toInt64OrNull(${rawTextExpr})) AS ${colSql}`
+  }
+  if (colType === 'Int64') {
+    return `ifNull(if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Int64)'), toInt64OrNull(${rawTextExpr})), toInt64(0)) AS ${colSql}`
+  }
+  if (colType === 'Nullable(Float64)') {
+    return `if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Float64)'), toFloat64OrNull(${rawTextExpr})) AS ${colSql}`
+  }
+  if (colType === 'Float64') {
+    return `ifNull(if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Float64)'), toFloat64OrNull(${rawTextExpr})), toFloat64(0)) AS ${colSql}`
+  }
+  if (colType === 'Nullable(Date)') {
+    return `if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Date)'), ifNull(toDateOrNull(${rawTextExpr}), toDate(parseDateTimeBestEffortOrNull(${rawTextExpr})))) AS ${colSql}`
+  }
+  return `ifNull(if(${isEmptyOrNullExpr}, CAST(NULL, 'Nullable(Date)'), ifNull(toDateOrNull(${rawTextExpr}), toDate(parseDateTimeBestEffortOrNull(${rawTextExpr})))), toDate('1970-01-01')) AS ${colSql}`
+}
 
 async function checkClickHouseAlive(
   client: ReturnType<typeof useClickHouse>,
@@ -60,13 +92,16 @@ export default defineEventHandler(async (event) => {
   let tableName = ''
   let delimiter = ','
   let targetColumns: string[] = []
+  let targetColumnTypes: SupportedColumnType[] = []
   let expectedRowCount = 0
   let verifiedRowCount = 0
   let createdStagingTable = false
+  let createdFinalStagingTable = false
   let renamedToFinalTable = false
   let quotedDb = ''
   let quotedTable = ''
   let quotedStagingTable = ''
+  let quotedFinalStagingTable = ''
   let currentStage = 'membaca_permintaan'
   let batchIndex = 0
 
@@ -104,11 +139,17 @@ export default defineEventHandler(async (event) => {
       payload.columns ?? inspection.suggestedColumns,
       inspection.columnCount,
     )
+    targetColumnTypes = validateTargetColumnTypes(
+      payload.columnTypes ?? inspection.suggestedTypes,
+      inspection.columnCount,
+    )
 
     const stagingTableName = `__tmp_ingest_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+    const finalStagingTableName = `__tmp_ingest_typed_${randomUUID().replace(/-/g, '').slice(0, 12)}`
     quotedDb = quoteIdentifier(targetDatabase)
     quotedTable = quoteIdentifier(tableName)
     quotedStagingTable = quoteIdentifier(stagingTableName)
+    quotedFinalStagingTable = quoteIdentifier(finalStagingTableName)
     const quotedColumns = targetColumns.map(quoteIdentifier)
     // Keep CSV empty values as strings while avoiding ClickHouse's unsafe disabled-setting path.
     const stagingColumnDefault = hasRealClickHouse ? " DEFAULT ''" : ''
@@ -218,18 +259,71 @@ export default defineEventHandler(async (event) => {
     }
 
     currentStage = 'finalisasi_tabel'
-    if (hasRealClickHouse) {
+    const allNullableString = targetColumnTypes.every((colType) => colType === 'Nullable(String)')
+
+    if (allNullableString) {
+      if (hasRealClickHouse) {
+        await client.command({
+          query: `ALTER TABLE ${quotedDb}.${quotedStagingTable} ${quotedColumns.map((colSql) => `MODIFY COLUMN ${colSql} REMOVE DEFAULT`).join(', ')}`,
+          clickhouse_settings: { max_execution_time: 60 },
+        })
+      }
+      await ensureTableDoesNotExist(client, targetDatabase, tableName)
       await client.command({
-        query: `ALTER TABLE ${quotedDb}.${quotedStagingTable} ${quotedColumns.map((colSql) => `MODIFY COLUMN ${colSql} REMOVE DEFAULT`).join(', ')}`,
+        query: `RENAME TABLE ${quotedDb}.${quotedStagingTable} TO ${quotedDb}.${quotedTable}`,
         clickhouse_settings: { max_execution_time: 60 },
       })
+      renamedToFinalTable = true
+    } else {
+      currentStage = 'konversi_skema_tabel'
+      const typedColumnDefinitions = quotedColumns
+        .map((colSql, idx) => `${colSql} ${targetColumnTypes[idx]}`)
+        .join(', ')
+
+      await createMergeTreeTableSafe(
+        client,
+        `CREATE TABLE ${quotedDb}.${quotedFinalStagingTable} (${typedColumnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
+        120,
+      )
+      createdFinalStagingTable = true
+
+      const selectExprs = quotedColumns.map((colSql, idx) =>
+        buildSafeTypedSelectExpr(colSql, targetColumnTypes[idx]!),
+      )
+
+      await client.command({
+        query: `INSERT INTO ${quotedDb}.${quotedFinalStagingTable} (${quotedColumns.join(', ')}) SELECT ${selectExprs.join(', ')} FROM ${quotedDb}.${quotedStagingTable}`,
+        clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 900 }),
+      })
+
+      const typedCountResult = await client.query({
+        query: `SELECT count() AS total FROM ${quotedDb}.${quotedFinalStagingTable}`,
+        format: 'JSONEachRow',
+        clickhouse_settings: { readonly: 1, max_execution_time: 120 },
+      })
+      const typedCountRows = await typedCountResult.json<{ total: number | string }[]>()
+      const typedActualCount = Number(typedCountRows[0]?.total)
+      if (!Number.isSafeInteger(typedActualCount) || typedActualCount !== expectedRowCount) {
+        throw createError({
+          statusCode: 500,
+          statusMessage: 'Verifikasi jumlah baris setelah konversi tipe gagal.',
+          message: `Jumlah baris pada tabel hasil konversi (${typedActualCount.toLocaleString('id-ID')}) tidak sama dengan data sumber (${expectedRowCount.toLocaleString('id-ID')}).`,
+        })
+      }
+
+      await client.command({
+        query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedStagingTable}`,
+        clickhouse_settings: { max_execution_time: 60 },
+      })
+      createdStagingTable = false
+
+      await ensureTableDoesNotExist(client, targetDatabase, tableName)
+      await client.command({
+        query: `RENAME TABLE ${quotedDb}.${quotedFinalStagingTable} TO ${quotedDb}.${quotedTable}`,
+        clickhouse_settings: { max_execution_time: 60 },
+      })
+      renamedToFinalTable = true
     }
-    await ensureTableDoesNotExist(client, targetDatabase, tableName)
-    await client.command({
-      query: `RENAME TABLE ${quotedDb}.${quotedStagingTable} TO ${quotedDb}.${quotedTable}`,
-      clickhouse_settings: { max_execution_time: 60 },
-    })
-    renamedToFinalTable = true
 
     verifiedRowCount = actualCount
     status = 'sukses'
@@ -247,6 +341,7 @@ export default defineEventHandler(async (event) => {
         targetDatabase,
         tableName,
         columns: targetColumns,
+        columnTypes: targetColumnTypes,
         columnCount: targetColumns.length,
       },
       sourceRows: expectedRowCount,
@@ -264,6 +359,7 @@ export default defineEventHandler(async (event) => {
       sourceLabel,
       delimiter,
       columns: targetColumns,
+      columnTypes: targetColumnTypes,
       rows: verifiedRowCount,
       durationMs,
       verification: `Terverifikasi ${verifiedRowCount} dari ${expectedRowCount} baris data berhasil dimuat ke ${targetDatabase}.${tableName}.`,
@@ -290,6 +386,17 @@ export default defineEventHandler(async (event) => {
         })
       } catch (dropErr) {
         console.warn('Gagal membersihkan tabel sementara setelah pemuatan batal.', dropErr)
+      }
+    }
+
+    if (createdFinalStagingTable && !renamedToFinalTable && quotedDb && quotedFinalStagingTable) {
+      try {
+        await client.command({
+          query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedFinalStagingTable}`,
+          clickhouse_settings: { max_execution_time: 30 },
+        })
+      } catch (dropErr) {
+        console.warn('Gagal membersihkan tabel konversi sementara setelah pemuatan batal.', dropErr)
       }
     }
 
@@ -323,6 +430,7 @@ export default defineEventHandler(async (event) => {
           targetDatabase,
           tableName,
           columns: targetColumns,
+          columnTypes: targetColumnTypes,
         },
         sourceRows: expectedRowCount,
         filledRows: 0,
