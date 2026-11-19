@@ -506,7 +506,7 @@
             </div>
 
             <div class="ingest-columns-editor">
-              <h4>Pemetaan nama &amp; tipe kolom hasil (otomatis terdeteksi dari sampel, dapat diubah)</h4>
+              <h4>Nama &amp; tipe kolom hasil (dapat diubah)</h4>
               <div class="ingest-columns-grid">
                 <div
                   v-for="(rawHeader, colIdx) in ingestInspection.rawHeaders"
@@ -1020,12 +1020,11 @@ const isValidTargetTableName = computed(() => newTableNamePattern.test(ingestTar
 
 function summarizeColumnTypes(types: string[]): string {
   if (!types.length) return 'belum ada kolom'
-  const nonNullableCount = types.filter((t) => !t.startsWith('Nullable(')).length
-  const nullableCount = types.length - nonNullableCount
-  const parts: string[] = []
-  if (nonNullableCount > 0) parts.push(`${nonNullableCount} non-nullable`)
-  if (nullableCount > 0) parts.push(`${nullableCount} nullable`)
-  return parts.join(', ')
+  const counts = new Map<string, number>()
+  for (const t of types) {
+    counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  return [...counts.entries()].map(([type, count]) => `${count} ${type}`).join(', ')
 }
 
 const ingestColumnValidationError = computed(() => {

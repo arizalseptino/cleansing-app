@@ -17,8 +17,8 @@ import {
   streamCsvBatchesFromBuffer,
   streamCsvBatchesFromFile,
   type SupportedColumnType,
+  validateColumnTypes,
   validateNewTableName,
-  validateTargetColumnTypes,
   validateTargetColumns,
 } from '../../features/ingest-csv'
 import { createMergeTreeTableSafe, quoteIdentifier } from '../../features/metadata'
@@ -139,7 +139,7 @@ export default defineEventHandler(async (event) => {
       payload.columns ?? inspection.suggestedColumns,
       inspection.columnCount,
     )
-    targetColumnTypes = validateTargetColumnTypes(
+    targetColumnTypes = validateColumnTypes(
       payload.columnTypes ?? inspection.suggestedTypes,
       inspection.columnCount,
     )

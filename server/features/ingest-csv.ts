@@ -440,7 +440,7 @@ export function inferColumnTypes(
   })
 }
 
-export function validateTargetColumnTypes(types: unknown, expectedCount: number): SupportedColumnType[] {
+export function validateColumnTypes(types: unknown, expectedCount: number): SupportedColumnType[] {
   if (!Array.isArray(types)) {
     ingestError('Daftar tipe data kolom wajib dikirim.', 400)
   }
@@ -462,6 +462,8 @@ export function validateTargetColumnTypes(types: unknown, expectedCount: number)
 
   return validated
 }
+
+export const validateTargetColumnTypes = validateColumnTypes
 
 export function validateNewTableName(rawName: unknown): string {
   if (typeof rawName !== 'string' || !rawName.trim()) {
