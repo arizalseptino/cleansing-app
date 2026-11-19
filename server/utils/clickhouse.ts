@@ -41,6 +41,8 @@ export const CLICKHOUSE_MEMORY_SETTINGS = {
   max_bytes_in_join: '200000000',
   max_memory_usage: '4000000000',
   max_threads: 4,
+  send_progress_in_http_headers: 1,
+  http_headers_progress_interval_ms: '30000',
 } as const
 
 export function buildClickHouseQuerySettings(
@@ -65,6 +67,7 @@ export function useClickHouse(): ClickHouseLikeClient {
         username: config.clickhouseUser,
         password: config.clickhousePassword,
         request_timeout: 600_000,
+        max_response_headers_size: 65536,
         keep_alive: {
           enabled: false,
         },

@@ -87,7 +87,7 @@ export default defineEventHandler(async (event) => {
 
   const client = useClickHouse()
   try {
-    let rowsIn: number
+    let rowsIn: number | null = null
     let compiled
     let columns: string[]
     let beforeAlias: (column: string) => string | null
@@ -109,17 +109,23 @@ export default defineEventHandler(async (event) => {
         ? `__sebelum_${column}`
         : null
 
-      stepInput = await compilePipeline(client, { ...pipeline, steps: steps.slice(0, -1) }, { skipValidation: true })
-      const inputRows = await client.query({
-        query: `SELECT count() AS total FROM (${stepInput.sql})`,
-        query_params: stepInput.params,
-        format: 'JSONEachRow',
-        clickhouse_settings: statsSettings,
-      })
-      const [inputCount] = await inputRows.json<{ total: number | string }[]>()
-      rowsIn = countValue(inputCount?.total, 'jumlah baris masuk')
-      if (steps[steps.length - 1]?.op === 'deduplicate') deduplicateStepIndex = steps.length - 1
-      if (steps[steps.length - 1]?.op === 'fuzzy_match_master') fuzzyStepIndex = steps.length - 1
+      const lastOp = steps[steps.length - 1]?.op
+      if (lastOp === 'deduplicate') deduplicateStepIndex = steps.length - 1
+      if (lastOp === 'fuzzy_match_master') fuzzyStepIndex = steps.length - 1
+
+      if (deduplicateStepIndex >= 0 || fuzzyStepIndex >= 0) {
+        stepInput = await compilePipeline(client, { ...pipeline, steps: steps.slice(0, -1) }, { skipValidation: true })
+      }
+      if (deduplicateStepIndex >= 0 && stepInput) {
+        const inputRows = await client.query({
+          query: `SELECT count() AS total FROM (${stepInput.sql})`,
+          query_params: stepInput.params,
+          format: 'JSONEachRow',
+          clickhouse_settings: statsSettings,
+        })
+        const [inputCount] = await inputRows.json<{ total: number | string }[]>()
+        rowsIn = countValue(inputCount?.total, 'jumlah baris masuk')
+      }
     } else {
       const initial = await compilePipeline(client, pipeline)
       columns = [...new Set([...initial.touchedColumns, ...initial.addedColumns])]
@@ -182,7 +188,8 @@ export default defineEventHandler(async (event) => {
     }
 
     const rowsOut = countValue(row.rows_out as number | string | undefined, 'jumlah baris keluar')
-    const droppedRows = Math.max(0, rowsIn - rowsOut)
+    const resolvedRowsIn = rowsIn ?? rowsOut
+    const droppedRows = Math.max(0, resolvedRowsIn - rowsOut)
     const stats: Record<string, ColumnStatistics> = {}
     for (const { column, index } of selected) {
       const beforeValue = row[`before_empty_${index}`]
@@ -389,7 +396,7 @@ FROM (
     return {
       scope,
       step: scope === 'step' ? Number('step' in body ? body.step : 1) : undefined,
-      rowsIn,
+      rowsIn: resolvedRowsIn,
       rowsOut,
       rowsDropped: droppedRows,
       totalRows: rowsOut,
