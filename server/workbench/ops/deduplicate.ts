@@ -60,7 +60,7 @@ const deduplicate: OperationDefinition = {
     const selectedCompleteness = stringList(context.params.completenessColumns, 'Kolom kelengkapan')
     const completenessColumns = selectedCompleteness.length
       ? selectedCompleteness
-      : context.schema.map(({ name }) => name).filter((name) => !keyColumns.includes(name))
+      : context.schema.map(({ name }) => name).filter((name) => !keyColumns.includes(name) && !name.startsWith('__sumber_'))
     const emptyValues = emptyValuesFrom(context.params.emptyValues)
     const scoreAliasBase = '__wb_dedup_score'
     let scoreAlias = scoreAliasBase

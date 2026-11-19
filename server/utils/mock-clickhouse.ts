@@ -1317,6 +1317,12 @@ export class MockClickHouseClient {
       const v = this.evalExpr(args[0], row, ctes)
       return v === null || v === undefined ? 0 : Math.trunc(Number(v))
     }
+    if (fn === 'abs') {
+      const v = this.evalExpr(args[0], row, ctes)
+      if (v === null || v === undefined) return null
+      const n = Number(v)
+      return Number.isFinite(n) ? Math.abs(n) : 0
+    }
     if (fn === 'if') {
       return toBool(this.evalExpr(args[0], row, ctes))
         ? this.evalExpr(args[1], row, ctes)
@@ -2093,6 +2099,58 @@ export class MockClickHouseClient {
       const tblTok = tokens[i + 2]
       const database = dbTok?.type === 'ident' ? dbTok.value : 'default'
       const table = tblTok?.type === 'ident' ? tblTok.value : ''
+      const afterTableIndex = i + 3
+
+      const isColumnListCreate = tokens[afterTableIndex]?.type === 'punct' && tokens[afterTableIndex].value === '('
+      if (!isColumnListCreate) {
+        const asTokenIndex = tokens.findIndex(
+          (tok, idx) => idx >= afterTableIndex && tok.type === 'ident' && tok.value.toUpperCase() === 'AS',
+        )
+        if (asTokenIndex !== -1) {
+          let engine = 'MergeTree'
+          let sorting_key = 'tuple()'
+          const headerTokens = tokens.slice(afterTableIndex, asTokenIndex)
+          for (let h = 0; h < headerTokens.length; h += 1) {
+            const tok = headerTokens[h]
+            if (tok?.type === 'ident' && tok.value.toUpperCase() === 'ENGINE') {
+              const nextTok = headerTokens[h + 1]?.type === 'op' && headerTokens[h + 1].value === '='
+                ? headerTokens[h + 2]
+                : headerTokens[h + 1]
+              if (nextTok?.type === 'ident') engine = nextTok.value
+            }
+            if (
+              tok?.type === 'ident'
+              && tok.value.toUpperCase() === 'ORDER'
+              && headerTokens[h + 1]?.type === 'ident'
+              && headerTokens[h + 1].value.toUpperCase() === 'BY'
+            ) {
+              const orderTok = headerTokens[h + 2]
+              if (orderTok?.type === 'ident') {
+                sorting_key = orderTok.value.toUpperCase() === 'TUPLE' ? 'tuple()' : orderTok.value
+              }
+            }
+          }
+
+          const selectParser = new SqlParser(tokens.slice(asTokenIndex + 1), query_params)
+          const ast = selectParser.parseQuery()
+          const res = this.evalQuery(ast)
+
+          if (!this.databases.has(database)) this.databases.set(database, new Map())
+          const db = this.databases.get(database)!
+          if (db.has(table)) {
+            if (ifNotExists) return
+            throw new Error(`Table ${database}.${table} already exists`)
+          }
+          db.set(table, {
+            name: table,
+            engine,
+            sorting_key,
+            columns: res.columns.map((c) => ({ ...c })),
+            rows: res.rows.map((r) => ({ ...r })),
+          })
+          return
+        }
+      }
 
       const openParen = trimmed.indexOf('(')
       const closeParen = findMatchingParen(trimmed, openParen)

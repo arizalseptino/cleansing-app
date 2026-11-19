@@ -321,17 +321,18 @@ export function buildFillFromMasterWorkbenchSql(options: {
   masterKeyColumn: string
   masterValueColumn: string
   schemaColumns: string[]
+  uniqueSourceSql?: string
 }): string {
   const aliasesUsed = new Set(options.schemaColumns)
   const aliases = {
+    srcKey: allocateAlias('__bd_fill_src_key', aliasesUsed),
+    mapKey: allocateAlias('__bd_fill_map_key', aliasesUsed),
     masterValues: allocateAlias('__bd_master_values', aliasesUsed),
-    targetEmpty: allocateAlias('__bd_target_empty', aliasesUsed),
-    sourceFilled: allocateAlias('__bd_source_filled', aliasesUsed),
     matches: allocateAlias('__bd_matches', aliasesUsed),
     bestMatches: allocateAlias('__bd_best_matches', aliasesUsed),
     ambiguous: allocateAlias('__bd_ambiguous', aliasesUsed),
     suggestion: allocateAlias('__bd_suggested_value', aliasesUsed),
-    category: allocateAlias('__bd_category', aliasesUsed),
+    fillable: allocateAlias('__bd_fillable', aliasesUsed),
   }
 
   const masterIdentifier = `${quoteIdentifier(options.masterDatabase)}.${quoteIdentifier(options.masterTable)}`
@@ -345,62 +346,69 @@ export function buildFillFromMasterWorkbenchSql(options: {
 
   const sourceQuoted = quoteIdentifier(options.sourceColumn)
   const targetQuoted = quoteIdentifier(options.targetColumn)
+  const srcKeyQuoted = quoteIdentifier(aliases.srcKey)
+  const mapKeyQuoted = quoteIdentifier(aliases.mapKey)
   const masterValuesAlias = quoteIdentifier(aliases.masterValues)
-  const targetEmptyQuoted = quoteIdentifier(aliases.targetEmpty)
-  const sourceFilledQuoted = quoteIdentifier(aliases.sourceFilled)
   const matchesQuoted = quoteIdentifier(aliases.matches)
   const bestMatchesQuoted = quoteIdentifier(aliases.bestMatches)
   const ambiguousQuoted = quoteIdentifier(aliases.ambiguous)
   const suggestionQuoted = quoteIdentifier(aliases.suggestion)
-  const categoryQuoted = quoteIdentifier(aliases.category)
+  const fillableQuoted = quoteIdentifier(aliases.fillable)
 
   const sourceTrimmed = `trimBoth(ifNull(toString(${sourceQuoted}), ''))`
-  const targetEmptyExpr = `(isNull(${targetQuoted}) OR trimBoth(ifNull(toString(${targetQuoted}), '')) = '')`
-  const matchExpr = `arrayFilter(item -> positionCaseInsensitiveUTF8(${sourceTrimmed}, tupleElement(item, 1)) > 0, ${masterValuesAlias})`
+  const uniqueSourceInputSql = options.uniqueSourceSql ?? '__INPUT__'
+  const matchExpr = `arrayFilter(item -> positionCaseInsensitiveUTF8(${mapKeyQuoted}, tupleElement(item, 1)) > 0, ${masterValuesAlias})`
   const bestMatchesExpr = `if(length(${matchesQuoted}) > 0, arrayFilter(item -> lengthUTF8(tupleElement(item, 1)) = lengthUTF8(tupleElement(arrayElement(${matchesQuoted}, 1), 1)), ${matchesQuoted}), CAST([], 'Array(Tuple(String, String))'))`
   const ambiguousExpr = `(length(arrayDistinct(arrayMap(item -> tupleElement(item, 2), ${bestMatchesQuoted}))) > 1)`
   const suggestionExpr = `if(length(${bestMatchesQuoted}) > 0 AND NOT ${ambiguousQuoted}, tupleElement(arrayElement(${bestMatchesQuoted}, 1), 2), '')`
-  const categoryExpr = `multiIf(NOT ${targetEmptyQuoted}, '', ${ambiguousQuoted}, 'ambiguous', NOT ${sourceFilledQuoted} OR length(${matchesQuoted}) = 0, 'remainingEmpty', 'fillable')`
 
-  const exceptColumns = [
-    targetEmptyQuoted,
-    sourceFilledQuoted,
-    matchesQuoted,
-    bestMatchesQuoted,
-    ambiguousQuoted,
-    suggestionQuoted,
-    categoryQuoted,
-  ].join(', ')
-
-  const replacement = `if(${targetEmptyQuoted} AND (${categoryQuoted} = 'fillable'), ${suggestionQuoted}, ${targetQuoted})`
-
-  return `
-    SELECT * EXCEPT (${exceptColumns}) REPLACE (${replacement} AS ${targetQuoted})
+  const distinctSourceMatchSql = `
+    SELECT
+      ${mapKeyQuoted},
+      ${suggestionExpr} AS ${suggestionQuoted},
+      toUInt8(1) AS ${fillableQuoted}
     FROM (
       SELECT
-        *,
-        ${suggestionExpr} AS ${suggestionQuoted},
-        ${categoryExpr} AS ${categoryQuoted}
+        ${mapKeyQuoted},
+        ${bestMatchesQuoted},
+        ${ambiguousExpr} AS ${ambiguousQuoted}
       FROM (
         SELECT
-          *,
-          ${ambiguousExpr} AS ${ambiguousQuoted}
+          ${mapKeyQuoted},
+          ${bestMatchesExpr} AS ${bestMatchesQuoted}
         FROM (
+          WITH ${masterValues} AS ${masterValuesAlias}
           SELECT
-            *,
-            ${bestMatchesExpr} AS ${bestMatchesQuoted}
+            ${mapKeyQuoted},
+            ${matchExpr} AS ${matchesQuoted}
           FROM (
-            WITH ${masterValues} AS ${masterValuesAlias}
-            SELECT
-              *,
-              ${targetEmptyExpr} AS ${targetEmptyQuoted},
-              notEmpty(${sourceTrimmed}) AS ${sourceFilledQuoted},
-              if((${targetEmptyExpr}) AND notEmpty(${sourceTrimmed}), ${matchExpr}, CAST([], 'Array(Tuple(String, String))')) AS ${matchesQuoted}
-            FROM __INPUT__
+            SELECT DISTINCT ${sourceTrimmed} AS ${mapKeyQuoted}
+            FROM ${uniqueSourceInputSql}
+            WHERE notEmpty(${sourceTrimmed})
           )
         )
       )
     )
+    WHERE length(${bestMatchesQuoted}) > 0 AND NOT ${ambiguousQuoted}
+  `
+
+  const targetEmptyExpr = `(isNull(${targetQuoted}) OR trimBoth(ifNull(toString(${targetQuoted}), '')) = '')`
+  const exceptColumns = [
+    srcKeyQuoted,
+    mapKeyQuoted,
+    suggestionQuoted,
+    fillableQuoted,
+  ].join(', ')
+  const replacement = `if(${targetEmptyExpr} AND ifNull(${fillableQuoted}, toUInt8(0)) = 1, ifNull(${suggestionQuoted}, ''), ${targetQuoted})`
+
+  return `
+    SELECT * EXCEPT (${exceptColumns}) REPLACE (${replacement} AS ${targetQuoted})
+    FROM (
+      SELECT *, ${sourceTrimmed} AS ${srcKeyQuoted}
+      FROM __INPUT__
+    ) AS __bd_fill_src
+    LEFT JOIN (${distinctSourceMatchSql}) AS __bd_fill_map
+    ON __bd_fill_src.${srcKeyQuoted} = __bd_fill_map.${mapKeyQuoted}
   `
 }
 

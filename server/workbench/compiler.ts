@@ -69,7 +69,12 @@ async function resolveSchema(
 export async function compilePipeline(
   client: ReturnType<typeof useClickHouse>,
   pipeline: Pipeline,
-  options: { includeBefore?: boolean; includeSourceColumns?: string[] } = {},
+  options: {
+    includeBefore?: boolean
+    includeSourceColumns?: string[]
+    metadataOverride?: { engine: string; sorting_key: string }
+    skipHeavyValidation?: boolean
+  } = {},
 ): Promise<CompiledPipeline> {
   if (!pipeline || !pipeline.source || !pipeline.source.database || !pipeline.source.table) {
     throw createError({
@@ -87,7 +92,8 @@ export async function compilePipeline(
     })
   }
 
-  const metadata = await getTableMetadata(client, pipeline.source)
+  const rawMetadata = await getTableMetadata(client, pipeline.source)
+  const metadata = options.metadataOverride ?? rawMetadata
   const sourceSchema = await getTableColumns(client, pipeline.source)
   let schema = sourceSchema
   const stepSchemas: StepSchemaStatus[] = []
@@ -183,6 +189,7 @@ export async function compilePipeline(
         inputSql: currentSql,
         inputParams: { ...boundParams },
         getColumnSourceSql,
+        skipHeavyValidation: options.skipHeavyValidation,
       }
       await operation.validate(context)
       const compiled = await operation.compile(context)

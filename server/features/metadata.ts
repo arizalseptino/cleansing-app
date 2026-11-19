@@ -1,4 +1,5 @@
 import type { useClickHouse } from '../utils/clickhouse'
+import { buildClickHouseQuerySettings } from '../utils/clickhouse'
 
 export type TableMetadata = {
   engine: string
@@ -180,6 +181,42 @@ export async function createMergeTreeTableSafe(
       await client.command({
         query: `${createSqlBase}${suffix}`,
         clickhouse_settings: { max_execution_time: maxExecutionTimeSec },
+      })
+      return
+    } catch (err) {
+      lastError = err
+      const msg = err instanceof Error ? err.message.toLowerCase() : ''
+      const isSettingErr = msg.includes('unknown_setting')
+        || msg.includes('unknown setting')
+        || msg.includes('auto_statistics_types')
+      if (!isSettingErr || i === settingsCandidates.length - 1) {
+        throw err
+      }
+    }
+  }
+  throw lastError
+}
+
+export async function createStagingTableFromSelectSafe(
+  client: ReturnType<typeof useClickHouse>,
+  tableIdentifier: string,
+  selectSql: string,
+  queryParams: Record<string, unknown>,
+  maxExecutionTimeSec = 900,
+): Promise<void> {
+  const settingsCandidates = [
+    " SETTINGS auto_statistics_types = ''",
+    '',
+  ]
+
+  let lastError: unknown
+  for (let i = 0; i < settingsCandidates.length; i += 1) {
+    const suffix = settingsCandidates[i]
+    try {
+      await client.command({
+        query: `CREATE TABLE ${tableIdentifier} ENGINE = MergeTree() ORDER BY tuple()${suffix} AS SELECT * FROM (${selectSql})`,
+        query_params: queryParams,
+        clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: maxExecutionTimeSec }),
       })
       return
     } catch (err) {

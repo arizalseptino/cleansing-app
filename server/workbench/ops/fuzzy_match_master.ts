@@ -377,6 +377,7 @@ export function buildFuzzyMappingSql(options: {
               WHERE s_norm NOT IN (${masterNormOnlySubquery})
             ) AS src_u
             CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
+            WHERE abs(toInt64(lengthUTF8(src_u.s_norm)) - toInt64(lengthUTF8(mst_u.m_norm))) <= 6
           )
           WHERE pair_score >= {${options.thresholdParamName}:Float64}
           GROUP BY s_norm
@@ -531,13 +532,17 @@ const fuzzyMatchMaster: OperationDefinition = {
 
     await validateDatabase(context.client, parsed.masterDatabase)
     const masterMeta = await validateTable(context.client, parsed.masterDatabase, parsed.masterTable)
-    await validateTextColumn(
-      context.client,
-      parsed.masterDatabase,
-      parsed.masterTable,
-      parsed.masterColumn,
-      'nama master',
-    )
+    await Promise.all([
+      validateTextColumn(
+        context.client,
+        parsed.masterDatabase,
+        parsed.masterTable,
+        parsed.masterColumn,
+        'nama master',
+      ),
+    ])
+
+    if (context.skipHeavyValidation) return
 
     const columnSource = context.getColumnSourceSql?.(parsed.sourceColumn)
     const inputSql = columnSource?.sql ?? context.inputSql ?? buildInputSql(context.source)

@@ -537,7 +537,17 @@
             </ul>
           </div>
           <p v-if="applyError" class="wb-error" role="alert">{{ applyError }}</p>
-          <p v-if="applying" class="wb-message" role="status">Sedang membuat tabel baru. Mohon tunggu...</p>
+          <div v-if="applying" class="wb-save-progress" role="status" aria-live="polite">
+            <div class="wb-save-progress-header">
+              <span>{{ applyProgress?.message || 'Sedang membuat tabel baru. Mohon tunggu...' }}</span>
+              <strong v-if="applyProgress && applyProgress.totalSteps > 0">
+                {{ applyProgress.currentStep }} / {{ applyProgress.totalSteps }}
+              </strong>
+            </div>
+            <div class="wb-save-progress-track" aria-hidden="true">
+              <div class="wb-save-progress-fill" :style="{ width: `${applyProgressPercent}%` }" />
+            </div>
+          </div>
           <div class="wb-dialog-actions">
             <button class="wb-button wb-primary" type="submit" :disabled="!canApply || applying">
               {{ applying ? 'Sedang membuat...' : 'Ya, buat tabel' }}
@@ -693,6 +703,22 @@ type ApplyResponse = {
   durationMs?: number
   verification?: string
 }
+type SaveTableStartResponse = {
+  jobId: string
+  status: 'running' | 'done' | 'error'
+  currentStep: number
+  totalSteps: number
+  message: string
+}
+type SaveTableStatusResponse = {
+  jobId: string
+  status: 'running' | 'done' | 'error'
+  currentStep: number
+  totalSteps: number
+  message: string
+  result?: ApplyResponse
+  error?: string
+}
 type RareValueItem = {
   nilai: string
   jumlah: number
@@ -773,6 +799,7 @@ const saveOriginal = ref(false)
 const applying = ref(false)
 const applyError = ref('')
 const applyResult = ref<ApplyResponse | null>(null)
+const applyProgress = ref<{ currentStep: number; totalSteps: number; message: string } | null>(null)
 const showResultExportDialog = ref(false)
 const masterColumns = ref<Column[]>([])
 
@@ -803,6 +830,8 @@ let previewController: AbortController | null = null
 let previewRequest = 0
 let schemaRequest = 0
 let masterColumnsRequest = 0
+let savePollTimer: ReturnType<typeof setTimeout> | null = null
+let activeSavePollRun = 0
 let returnFocusElement: HTMLElement | null = null
 
 const sourceReady = computed(() => Boolean(pipeline.value.source.database && pipeline.value.source.table))
@@ -848,6 +877,12 @@ const canOpenSave = computed(() => sourceReady.value
   && pipeline.value.steps.length > 0
   && stepStates.value.length === pipeline.value.steps.length
   && stepStates.value.every(({ status }) => status === 'valid'))
+const applyProgressPercent = computed(() => {
+  const progress = applyProgress.value
+  if (!progress || progress.totalSteps <= 0) return 8
+  if (progress.currentStep <= 0) return 5
+  return Math.min(100, Math.max(5, Math.round((progress.currentStep / progress.totalSteps) * 100)))
+})
 
 const rareTextColumns = computed(() => visibleColumns.value.filter(isTextColumn))
 const selectedRareItems = computed(() => {
@@ -1409,6 +1444,14 @@ function pickDefaultRareColumn(cols: Column[]): string {
   return cols.find((col) => !isIdColumn(col))?.name ?? cols[0]?.name ?? ''
 }
 
+function clearSavePollTimer(): void {
+  activeSavePollRun += 1
+  if (savePollTimer !== null) {
+    clearTimeout(savePollTimer)
+    savePollTimer = null
+  }
+}
+
 function openSaveDialog(): void {
   const sourceName = pipeline.value.source.table
   resultTableName.value = `${sourceName}_cleaned`.slice(0, 64)
@@ -1417,6 +1460,7 @@ function openSaveDialog(): void {
   saveOriginal.value = pipeline.value.saveOptions.saveOriginal
   applyError.value = ''
   applyResult.value = null
+  applyProgress.value = null
   showSaveDialog.value = true
 }
 
@@ -1426,10 +1470,18 @@ function selectOrderBy(column: string): void {
 
 async function applyPipeline(): Promise<void> {
   if (!canApply.value) return
+  clearSavePollTimer()
+  const pollRun = activeSavePollRun
   applying.value = true
   applyError.value = ''
+  applyProgress.value = {
+    currentStep: 0,
+    totalSteps: pipeline.value.steps.length,
+    message: 'Mengirim permintaan pembuatan tabel...',
+  }
+
   try {
-    const response = await $fetch<ApplyResponse>('/api/workbench/apply', {
+    const startResponse = await $fetch<SaveTableStartResponse>('/api/workbench/save-table', {
       method: 'POST',
       body: {
         source: pipeline.value.source,
@@ -1440,10 +1492,66 @@ async function applyPipeline(): Promise<void> {
         saveOriginal: saveOriginal.value,
       },
     })
-    applyResult.value = response
+
+    if (pollRun !== activeSavePollRun) return
+    applyProgress.value = {
+      currentStep: startResponse.currentStep,
+      totalSteps: startResponse.totalSteps,
+      message: startResponse.message,
+    }
+
+    let consecutiveErrors = 0
+    const pollStatus = async (): Promise<void> => {
+      if (pollRun !== activeSavePollRun) return
+      try {
+        const statusRes = await $fetch<SaveTableStatusResponse>('/api/workbench/save-table-status', {
+          query: { jobId: startResponse.jobId },
+        })
+        if (pollRun !== activeSavePollRun) return
+        consecutiveErrors = 0
+        applyProgress.value = {
+          currentStep: statusRes.currentStep,
+          totalSteps: statusRes.totalSteps,
+          message: statusRes.message,
+        }
+
+        if (statusRes.status === 'done' && statusRes.result) {
+          applyResult.value = statusRes.result
+          applying.value = false
+          return
+        }
+        if (statusRes.status === 'error') {
+          applyError.value = statusRes.error || statusRes.message || 'Tabel hasil tidak dapat dibuat.'
+          applying.value = false
+          return
+        }
+
+        savePollTimer = setTimeout(() => {
+          void pollStatus()
+        }, 2000)
+      } catch (pollErr) {
+        if (pollRun !== activeSavePollRun) return
+        const statusCode = pollErr && typeof pollErr === 'object' && 'statusCode' in pollErr
+          ? Number((pollErr as { statusCode?: unknown }).statusCode)
+          : 0
+        consecutiveErrors += 1
+        if (statusCode === 400 || statusCode === 404 || consecutiveErrors >= 3) {
+          applyError.value = getErrorMessage(pollErr, 'Gagal memeriksa progres pembuatan tabel.')
+          applying.value = false
+          return
+        }
+        savePollTimer = setTimeout(() => {
+          void pollStatus()
+        }, 2000)
+      }
+    }
+
+    savePollTimer = setTimeout(() => {
+      void pollStatus()
+    }, 2000)
   } catch (error) {
+    if (pollRun !== activeSavePollRun) return
     applyError.value = getErrorMessage(error, 'Tabel hasil tidak dapat dibuat.')
-  } finally {
     applying.value = false
   }
 }
@@ -1860,6 +1968,10 @@ onMounted(async () => {
     void refreshStepSchemas()
     void loadPreview()
   }
+})
+
+onUnmounted(() => {
+  clearSavePollTimer()
 })
 </script>
 
@@ -2539,6 +2651,39 @@ onMounted(async () => {
   justify-content: flex-start;
   flex-wrap: wrap;
   margin-top: 6px;
+}
+
+.wb-save-progress {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #c7dcef;
+  border-radius: 9px;
+  background: #f4f9fe;
+}
+
+.wb-save-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #2c4358;
+  font-size: 13px;
+}
+
+.wb-save-progress-track {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfeaf4;
+}
+
+.wb-save-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--warna-utama);
+  transition: width 250ms ease;
 }
 
 @media (max-width: 1100px) {

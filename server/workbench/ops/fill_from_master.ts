@@ -59,6 +59,7 @@ const fillFromMaster: OperationDefinition = {
     const masterValueColumn = rawMasterValue || masterKeyColumn
 
     const masterMetadata = await validateTable(context.client, masterDatabase, masterTable)
+    const columnSource = context.getColumnSourceSql?.(sourceColumn)
     const sql = buildFillFromMasterWorkbenchSql({
       sourceColumn,
       targetColumn,
@@ -68,6 +69,7 @@ const fillFromMaster: OperationDefinition = {
       masterKeyColumn,
       masterValueColumn,
       schemaColumns: context.schema.map((column) => column.name),
+      uniqueSourceSql: columnSource ? `(${columnSource.sql})` : undefined,
     })
 
     return {
