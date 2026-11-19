@@ -69,7 +69,7 @@ async function resolveSchema(
 export async function compilePipeline(
   client: ReturnType<typeof useClickHouse>,
   pipeline: Pipeline,
-  options: { includeBefore?: boolean; includeSourceColumns?: string[]; skipValidation?: boolean } = {},
+  options: { includeBefore?: boolean; includeSourceColumns?: string[] } = {},
 ): Promise<CompiledPipeline> {
   if (!pipeline || !pipeline.source || !pipeline.source.database || !pipeline.source.table) {
     throw createError({
@@ -104,7 +104,7 @@ export async function compilePipeline(
       throw createError({
         statusCode: 400,
         statusMessage: 'Nama kolom sementara bertabrakan',
-        message: 'Kolom sumber memiliki nama yang bertabrakan dengan kolom statistik sementara.',
+        message: 'Kolom sumber memiliki nama yang bertabrakan dengan kolom sementara pipeline.',
       })
     }
   }
@@ -165,8 +165,6 @@ export async function compilePipeline(
   const addedColumns = new Set<string>()
   const warnings: string[] = []
   let changesRowCount = false
-  let lastStepTouchedColumns: string[] = []
-  let lastStepAddedColumns: string[] = []
 
   for (let index = 0; index < pipeline.steps.length; index += 1) {
     const step = pipeline.steps[index]
@@ -186,16 +184,14 @@ export async function compilePipeline(
         inputParams: { ...boundParams },
         getColumnSourceSql,
       }
-      if (!options.skipValidation) {
-        await operation.validate(context)
-      }
+      await operation.validate(context)
       const compiled = await operation.compile(context)
       changesRowCount ||= operation.changesRowCount === true
       for (const warning of compiled.warnings ?? []) warnings.push(`Langkah ${index + 1}: ${warning}`)
-      lastStepTouchedColumns = [...new Set(compiled.touchedColumns)]
-      lastStepAddedColumns = [...new Set(compiled.addedColumns)]
-      for (const column of lastStepTouchedColumns) touchedColumns.add(column)
-      for (const column of lastStepAddedColumns) addedColumns.add(column)
+      const stepTouchedColumns = [...new Set(compiled.touchedColumns)]
+      const stepAddedColumns = [...new Set(compiled.addedColumns)]
+      for (const column of stepTouchedColumns) touchedColumns.add(column)
+      for (const column of stepAddedColumns) addedColumns.add(column)
       const includeBefore = options.includeBefore && index === pipeline.steps.length - 1
       const beforeColumns = [...new Set(compiled.beforeColumns ?? compiled.touchedColumns)]
       const beforeAliases = includeBefore
@@ -228,7 +224,7 @@ export async function compilePipeline(
       currentSql = nextSql
 
       schema = await resolveSchema(client, currentSql, boundParams)
-      const writeColumns = [...new Set([...lastStepTouchedColumns, ...lastStepAddedColumns])]
+      const writeColumns = [...new Set([...stepTouchedColumns, ...stepAddedColumns])]
       const requiresFullHistory = (step.op === 'add_column' && step.params?.kind === 'sequence')
         || step.op === 'fuzzy_match_master'
       stepEntries.push({
@@ -267,8 +263,6 @@ export async function compilePipeline(
     stepSchemas,
     touchedColumns: [...touchedColumns],
     addedColumns: [...addedColumns],
-    lastStepTouchedColumns,
-    lastStepAddedColumns,
     changesRowCount,
     warnings,
   }

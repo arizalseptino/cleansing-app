@@ -99,8 +99,6 @@ export type CompiledPipeline = {
   stepSchemas: StepSchemaStatus[]
   touchedColumns: string[]
   addedColumns: string[]
-  lastStepTouchedColumns: string[]
-  lastStepAddedColumns: string[]
   changesRowCount: boolean
   warnings: string[]
 }

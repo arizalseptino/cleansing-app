@@ -161,7 +161,7 @@ export default defineEventHandler(async (event) => {
       query: `SELECT count() AS total FROM (${compiled.sql})`,
       query_params: compiled.params,
       format: 'JSONEachRow',
-      clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 120, readonly: 1 }),
+      clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 300, readonly: 1 }),
     })
     const [pipelineCountRow] = await pipelineCount.json<{ total: number | string }[]>()
     expectedResultRows = countValue(pipelineCountRow?.total, 'jumlah baris hasil pipeline')
@@ -184,7 +184,7 @@ export default defineEventHandler(async (event) => {
     await createMergeTreeTableSafe(
       client,
       `CREATE TABLE ${tableIdentifier} (${columnSql}) ENGINE ${engine} ORDER BY ${orderByClause}`,
-      180,
+      300,
     )
     resultTableCreated = true
 

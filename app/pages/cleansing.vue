@@ -190,16 +190,8 @@
             </select>
           </label>
         </div>
-        <div class="wb-data-actions">
-          <button
-            class="wb-button wb-small"
-            type="button"
-            :disabled="selectedStep === 0 || !sourceReady || previewPending || stepStates[selectedStep - 1]?.status !== 'valid'"
-            @click="loadStatistics"
-          >
-            Hitung statistik langkah ini
-          </button>
-          <span v-if="previewPending" class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
+        <div v-if="previewPending" class="wb-data-actions">
+          <span class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
         </div>
         <div v-if="displayFilter" class="wb-filter-chip" role="status">
           <span>
@@ -276,94 +268,6 @@
             </div>
           </nav>
         </template>
-
-        <section v-if="statistics || statisticsError" class="wb-statistics" aria-live="polite">
-          <h3>Statistik langkah {{ selectedStep }}</h3>
-          <template v-if="statistics">
-            <p>{{ numberFormat(statistics.rowsIn) }} baris masuk · {{ numberFormat(statistics.rowsOut) }} baris keluar · {{ numberFormat(statistics.rowsDropped) }} baris dibuang.</p>
-            <p v-if="statistics.duplicateGroups !== undefined && statistics.discardedRows !== undefined && statistics.conflictGroups !== undefined">
-              {{ numberFormat(statistics.duplicateGroups) }} grup duplikat ·
-              {{ numberFormat(statistics.discardedRows) }} baris dibuang ·
-              {{ numberFormat(statistics.conflictGroups) }} grup memiliki isi yang berbeda.
-            </p>
-            <p v-if="statistics.fuzzyMatch" class="wb-fuzzy-summary">
-              {{ numberFormat(statistics.fuzzyMatch.uniqueSourceValues) }} nilai unik sumber ·
-              {{ numberFormat(statistics.fuzzyMatch.exactMatches) }} cocok persis ·
-              {{ numberFormat(statistics.fuzzyMatch.fuzzyMatches) }} cocok mirip ·
-              {{ numberFormat(statistics.fuzzyMatch.ambiguousMatches) }} ambigu ·
-              {{ numberFormat(statistics.fuzzyMatch.unmatchedValues) }} tidak cocok ·
-              {{ numberFormat(statistics.fuzzyMatch.routedRows) }} baris dipindahkan.
-            </p>
-            <div v-for="(columnStats, columnName) in statistics.stats" :key="columnName" class="wb-stat-column">
-              <strong>{{ columnName }}</strong>
-              <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
-              <span>NULL/kosong sebelum: {{ columnStats.beforeNullOrEmpty === null ? 'Tidak ada pada sumber' : numberFormat(columnStats.beforeNullOrEmpty) }}</span>
-              <span>NULL/kosong sesudah: {{ numberFormat(columnStats.afterNullOrEmpty) }}</span>
-            </div>
-            <p v-if="Object.keys(statistics.stats).length === 0">Tidak ada kolom yang berubah untuk diringkas.</p>
-
-            <div v-if="statistics.fuzzyMatch" class="wb-fuzzy-review">
-              <div class="wb-fuzzy-review-header">
-                <div>
-                  <h4>Tinjau pasangan</h4>
-                  <p>Daftar hingga 50 contoh pasangan nilai unik untuk meninjau kecocokan borderline.</p>
-                </div>
-                <div class="wb-fuzzy-controls">
-                  <label>
-                    <span>Urutan</span>
-                    <select v-model="pairOrder" :disabled="statisticsPending" @change="loadStatistics">
-                      <option value="lowest_score">Skor terendah dulu</option>
-                      <option value="highest_score">Skor tertinggi dulu</option>
-                      <option value="most_rows">Baris terbanyak dulu</option>
-                    </select>
-                  </label>
-                  <form
-                    v-if="selectedFuzzyStep && (selectedFuzzyStep.params?.mode ?? 'similarity') === 'similarity'"
-                    class="wb-fuzzy-threshold-form"
-                    @submit.prevent="applyFuzzyThreshold"
-                  >
-                    <label>
-                      <span>Ambang</span>
-                      <input v-model.number="thresholdDraft" type="number" min="0.5" max="1" step="0.01" required />
-                    </label>
-                    <button class="wb-button wb-small wb-primary" type="submit" :disabled="statisticsPending">
-                      Terapkan ambang
-                    </button>
-                  </form>
-                </div>
-              </div>
-              <p v-if="statistics.fuzzyMatch.pairs.length === 0" class="wb-message">
-                Tidak ada nilai unik sumber non-kosong untuk ditinjau.
-              </p>
-              <div v-else class="wb-fuzzy-table-wrap">
-                <table class="wb-fuzzy-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Nilai sumber</th>
-                      <th scope="col">Nilai master terpilih</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Skor</th>
-                      <th scope="col">Baris</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(pair, pairIdx) in statistics.fuzzyMatch.pairs" :key="`${pair.sourceValue}-${pairIdx}`">
-                      <td>{{ pair.sourceValue }}</td>
-                      <td>
-                        <span v-if="pair.masterValue !== null">{{ pair.masterValue }}</span>
-                        <span v-else class="wb-cell-null">—</span>
-                      </td>
-                      <td>{{ fuzzyStatusLabel(pair.status) }}</td>
-                      <td>{{ scoreFormat(pair.score) }}</td>
-                      <td>{{ numberFormat(pair.rowCount) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </template>
-          <p v-if="statisticsError" class="wb-error" role="alert">{{ statisticsError }}</p>
-        </section>
 
         <section class="wb-rare-panel" aria-label="Cek Sisa Anomali / Typo (Frekuensi Rendah)">
           <div class="wb-rare-heading">
@@ -578,26 +482,6 @@
       <template v-else>
         <form class="wb-save-form" @submit.prevent="applyPipeline">
           <p class="wb-safety-note">Tabel sumber <code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> tidak akan diubah.</p>
-          <section class="wb-save-statistics" aria-live="polite">
-            <h3>Ringkasan seluruh pipeline</h3>
-            <p v-if="pipelineStatisticsPending" class="wb-message" role="status">Menghitung ringkasan sebelum dan sesudah...</p>
-            <p v-else-if="pipelineStatisticsError" class="wb-error" role="alert">{{ pipelineStatisticsError }}</p>
-            <template v-else-if="pipelineStatistics">
-              <p>{{ numberFormat(pipelineStatistics.rowsIn) }} baris masuk · {{ numberFormat(pipelineStatistics.rowsOut) }} baris hasil · {{ numberFormat(pipelineStatistics.rowsDropped) }} baris dibuang</p>
-              <p v-if="pipelineStatistics.duplicateGroups !== undefined && pipelineStatistics.discardedRows !== undefined && pipelineStatistics.conflictGroups !== undefined">
-                {{ numberFormat(pipelineStatistics.duplicateGroups) }} grup duplikat ·
-                {{ numberFormat(pipelineStatistics.discardedRows) }} baris dibuang ·
-                {{ numberFormat(pipelineStatistics.conflictGroups) }} grup memiliki isi yang berbeda.
-              </p>
-              <div v-for="(columnStats, columnName) in pipelineStatistics.stats" :key="columnName" class="wb-stat-column">
-                <strong>{{ columnName }}</strong>
-                <span>Berubah: {{ numberFormat(columnStats.changed) }}</span>
-                <span>NULL/kosong sebelum: {{ columnStats.beforeNullOrEmpty === null ? 'Tidak tersedia pada sumber' : numberFormat(columnStats.beforeNullOrEmpty) }}</span>
-                <span>NULL/kosong sesudah: {{ numberFormat(columnStats.afterNullOrEmpty) }}</span>
-              </div>
-              <p v-if="Object.keys(pipelineStatistics.stats).length === 0">Tidak ada kolom yang berubah untuk diringkas.</p>
-            </template>
-          </section>
           <label for="wb-result-name">Nama tabel hasil</label>
           <input id="wb-result-name" v-model="resultTableName" maxlength="64" required :disabled="applying" />
           <p v-if="resultTableName && !validResultName" class="wb-error" role="alert">
@@ -799,42 +683,6 @@ type StepState = { status: 'valid' | 'error' | 'loading'; schema?: Column[]; mes
 type PreviewRow = Record<string, unknown>
 type PreviewResponse = { columns: string[]; rows: PreviewRow[]; totalRows: number; page: number; limit: number; warnings?: string[] }
 type SchemaResponse = { valid: boolean; schema?: Column[]; error?: string; steps?: Array<{ index: number; valid: boolean; schema?: Column[]; error?: string; warnings?: string[] }> }
-type FuzzyPairOrder = 'lowest_score' | 'highest_score' | 'most_rows'
-type FuzzyPairItem = {
-  sourceValue: string
-  masterValue: string | null
-  score: number
-  rowCount: number
-  status: 'exact' | 'fuzzy' | 'ambiguous' | 'unmatched'
-}
-type FuzzyMatchStatistics = {
-  uniqueSourceValues: number
-  exactMatches: number
-  fuzzyMatches: number
-  ambiguousMatches: number
-  unmatchedValues: number
-  routedRows: number
-  pairOrder: FuzzyPairOrder
-  pairs: FuzzyPairItem[]
-}
-type StatisticsResponse = {
-  scope: 'step' | 'pipeline'
-  step?: number
-  rowsIn: number
-  rowsOut: number
-  totalRows: number
-  stats: Record<string, {
-    changed: number
-    beforeNullOrEmpty: number | null
-    afterNullOrEmpty: number
-  }>
-  rowsDropped: number
-  duplicateGroups?: number
-  discardedRows?: number
-  conflictGroups?: number
-  fuzzyMatch?: FuzzyMatchStatistics
-  [key: string]: unknown
-}
 type SqlResponse = { sql: string; params: Record<string, unknown>; schema: Column[]; warnings?: string[] }
 type ApplyResponse = {
   status: string
@@ -903,14 +751,6 @@ const previewError = ref('')
 const previewRows = ref<PreviewRow[]>([])
 const previewWarnings = ref<string[]>([])
 const totalRows = ref(0)
-const statistics = ref<StatisticsResponse | null>(null)
-const statisticsError = ref('')
-const statisticsPending = ref(false)
-const pairOrder = ref<FuzzyPairOrder>('lowest_score')
-const thresholdDraft = ref(0.9)
-const pipelineStatistics = ref<StatisticsResponse | null>(null)
-const pipelineStatisticsError = ref('')
-const pipelineStatisticsPending = ref(false)
 const sqlPending = ref(false)
 const sqlError = ref('')
 const sqlResult = ref<SqlResponse | null>(null)
@@ -962,18 +802,11 @@ const columnMappingDraft = reactive<Record<string, string>>({})
 let previewController: AbortController | null = null
 let previewRequest = 0
 let schemaRequest = 0
-let statisticsRequest = 0
-let pipelineStatisticsRequest = 0
 let masterColumnsRequest = 0
 let returnFocusElement: HTMLElement | null = null
 
 const sourceReady = computed(() => Boolean(pipeline.value.source.database && pipeline.value.source.table))
 const selectedOperation = computed(() => operations.value.find(({ id }) => id === selectedOperationId.value) ?? null)
-const selectedFuzzyStep = computed(() => {
-  if (selectedStep.value < 1) return null
-  const step = pipeline.value.steps[selectedStep.value - 1]
-  return step?.op === 'fuzzy_match_master' ? step : null
-})
 const visibleColumns = computed(() => {
   const schema = selectedStep.value === 0
     ? sourceColumns.value
@@ -1272,7 +1105,6 @@ function changeTable(event: Event): void {
 function selectStep(index: number): void {
   selectedStep.value = index
   page.value = 1
-  statistics.value = null
   activeColumnMenu.value = ''
   resetOperationForm()
 }
@@ -1351,7 +1183,6 @@ function commitForm(params: Record<string, unknown>): void {
     selectedStep.value = editingStepIndex.value + 1
   }
   page.value = 1
-  statistics.value = null
   resetOperationForm()
   workbench.savePipeline()
 }
@@ -1368,7 +1199,6 @@ function moveStep(index: number, offset: number): void {
   const selectedIndex = pipeline.value.steps.findIndex(({ id }) => id === selectedId)
   if (selectedIndex >= 0) selectedStep.value = selectedIndex + 1
   page.value = 1
-  statistics.value = null
   workbench.savePipeline()
 }
 
@@ -1377,7 +1207,6 @@ function deleteStep(index: number): void {
   if (selectedStep.value > pipeline.value.steps.length) selectedStep.value = pipeline.value.steps.length
   else if (selectedStep.value === index + 1) selectedStep.value = Math.max(0, index)
   page.value = 1
-  statistics.value = null
   resetOperationForm()
   workbench.savePipeline()
 }
@@ -1501,60 +1330,6 @@ async function loadPreview(): Promise<void> {
   }
 }
 
-function fuzzyStatusLabel(status: FuzzyPairItem['status']): string {
-  if (status === 'exact') return 'Cocok persis'
-  if (status === 'fuzzy') return 'Cocok mirip'
-  if (status === 'ambiguous') return 'Ambigu'
-  return 'Tidak cocok'
-}
-
-function scoreFormat(score: number): string {
-  return Number(score ?? 0).toLocaleString('id-ID', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  })
-}
-
-async function applyFuzzyThreshold(): Promise<void> {
-  if (!selectedFuzzyStep.value || selectedStep.value < 1) return
-  const clamped = Math.min(1, Math.max(0.5, Number(thresholdDraft.value) || 0.9))
-  const rounded = Math.round(clamped * 100) / 100
-  thresholdDraft.value = rounded
-  selectedFuzzyStep.value.params = {
-    ...selectedFuzzyStep.value.params,
-    threshold: rounded,
-  }
-  workbench.savePipeline()
-  await loadStatistics()
-}
-
-async function loadStatistics(): Promise<void> {
-  if (selectedStep.value < 1) return
-  const request = ++statisticsRequest
-  statisticsPending.value = true
-  statisticsError.value = ''
-  try {
-    const response = await $fetch<StatisticsResponse>('/api/workbench/stats', {
-      method: 'POST',
-      body: {
-        source: pipeline.value.source,
-        steps: pipeline.value.steps.slice(0, selectedStep.value),
-        step: selectedStep.value,
-        scope: 'step',
-        pairOrder: pairOrder.value,
-      },
-    })
-    if (request === statisticsRequest) statistics.value = response
-  } catch (error) {
-    if (request === statisticsRequest) {
-      statistics.value = null
-      statisticsError.value = getErrorMessage(error, 'Statistik tidak dapat dihitung.')
-    }
-  } finally {
-    if (request === statisticsRequest) statisticsPending.value = false
-  }
-}
-
 async function openSql(): Promise<void> {
   showSqlPanel.value = true
   sqlResult.value = null
@@ -1642,34 +1417,7 @@ function openSaveDialog(): void {
   saveOriginal.value = pipeline.value.saveOptions.saveOriginal
   applyError.value = ''
   applyResult.value = null
-  pipelineStatistics.value = null
-  pipelineStatisticsError.value = ''
   showSaveDialog.value = true
-  void loadPipelineStatistics()
-}
-
-async function loadPipelineStatistics(): Promise<void> {
-  const request = ++pipelineStatisticsRequest
-  pipelineStatisticsPending.value = true
-  pipelineStatistics.value = null
-  pipelineStatisticsError.value = ''
-  try {
-    const response = await $fetch<StatisticsResponse>('/api/workbench/stats', {
-      method: 'POST',
-      body: {
-        source: pipeline.value.source,
-        steps: pipeline.value.steps,
-        scope: 'pipeline',
-      },
-    })
-    if (request === pipelineStatisticsRequest) pipelineStatistics.value = response
-  } catch (error) {
-    if (request === pipelineStatisticsRequest) {
-      pipelineStatisticsError.value = getErrorMessage(error, 'Ringkasan pipeline tidak dapat dihitung.')
-    }
-  } finally {
-    if (request === pipelineStatisticsRequest) pipelineStatisticsPending.value = false
-  }
 }
 
 function selectOrderBy(column: string): void {
@@ -2072,7 +1820,6 @@ watch(
   () => `${pipeline.value.source.database}\u0000${pipeline.value.source.table}\u0000${JSON.stringify(pipeline.value.steps)}`,
   () => {
     page.value = 1
-    statistics.value = null
     rareResult.value = null
     selectedRareKeys.value = []
     workbench.savePipeline()
@@ -2085,7 +1832,6 @@ watch(
 )
 
 watch([selectedStep, page, limit], () => {
-  statistics.value = null
   void loadPreview()
 })
 
@@ -2093,15 +1839,6 @@ watch(selectedStep, () => {
   rareResult.value = null
   selectedRareKeys.value = []
 })
-
-watch(
-  () => selectedFuzzyStep.value?.params?.threshold,
-  (val) => {
-    const parsed = Number(val)
-    thresholdDraft.value = Number.isFinite(parsed) && parsed >= 0.5 && parsed <= 1 ? parsed : 0.9
-  },
-  { immediate: true },
-)
 
 watch(
   () => pipeline.value.source.database,
@@ -2603,44 +2340,6 @@ onMounted(async () => {
 
 .wb-pagination > div {
   flex-wrap: wrap;
-}
-
-.wb-statistics {
-  display: grid;
-  gap: 8px;
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 10px;
-  background: #f8fafc;
-}
-
-.wb-statistics h3,
-.wb-statistics p {
-  margin: 0;
-}
-
-.wb-statistics h3 {
-  font-size: 14px;
-}
-
-.wb-statistics p,
-.wb-stat-column span {
-  color: var(--warna-redup);
-  font-size: 12px;
-}
-
-.wb-stat-column {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  padding-top: 8px;
-  border-top: 1px solid #e3ebf2;
-}
-
-.wb-stat-column strong {
-  width: 100%;
-  font-size: 12px;
 }
 
 .wb-operation-list {
@@ -3211,106 +2910,6 @@ onMounted(async () => {
   background: #fff;
   font: inherit;
   font-size: 13px;
-}
-
-.wb-fuzzy-summary {
-  color: #263a4e;
-  font-weight: 500;
-}
-
-.wb-fuzzy-review {
-  display: grid;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px solid #e3ebf2;
-}
-
-.wb-fuzzy-review-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.wb-fuzzy-review-header h4 {
-  margin: 0;
-  color: #263a4e;
-  font-size: 13px;
-}
-
-.wb-fuzzy-review-header p {
-  margin: 2px 0 0;
-  color: var(--warna-redup);
-  font-size: 12px;
-}
-
-.wb-fuzzy-controls,
-.wb-fuzzy-threshold-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.wb-fuzzy-controls label,
-.wb-fuzzy-threshold-form label {
-  display: grid;
-  gap: 3px;
-  color: #40566d;
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.wb-fuzzy-controls select,
-.wb-fuzzy-threshold-form input {
-  min-height: 34px;
-  padding: 4px 8px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 8px;
-  color: var(--warna-teks);
-  background: #fff;
-  font: inherit;
-  font-size: 12px;
-}
-
-.wb-fuzzy-threshold-form input {
-  width: 84px;
-}
-
-.wb-fuzzy-table-wrap {
-  max-height: 260px;
-  overflow: auto;
-  border: 1px solid var(--warna-garis);
-  border-radius: 8px;
-  background: #fff;
-}
-
-.wb-fuzzy-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.wb-fuzzy-table th,
-.wb-fuzzy-table td {
-  padding: 7px 9px;
-  border-bottom: 1px solid #e8eff5;
-  text-align: left;
-  vertical-align: top;
-}
-
-.wb-fuzzy-table th {
-  position: sticky;
-  top: 0;
-  color: #526479;
-  background: #f5f8fa;
-  font-weight: 650;
-}
-
-.wb-fuzzy-table tbody tr:last-child td {
-  border-bottom: 0;
 }
 
 @media (max-width: 620px) {

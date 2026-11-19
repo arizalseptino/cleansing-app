@@ -74,6 +74,7 @@ export function useClickHouse(): ClickHouseLikeClient {
         },
         clickhouse_settings: {
           ...CLICKHOUSE_MEMORY_SETTINGS,
+          max_execution_time: 300,
         },
       }) as unknown as ClickHouseLikeClient
     } else {
