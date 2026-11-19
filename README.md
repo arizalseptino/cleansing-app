@@ -1,75 +1,36 @@
-# Nuxt Minimal Starter
+# BersihData
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+Aplikasi web berbasis Nuxt dan ClickHouse untuk eksplorasi, pembersihan (*data cleansing*), standardisasi, dan ekspor data tabular skala besar secara interaktif.
 
-## Setup
+## Konteks Lingkungan Eksekusi
 
-Make sure to install dependencies:
+- **Mesin Basis Data**: ClickHouse LTS `v26.8.40.8` (lokal).
+- **Sistem Berkas (*Filesystem*)**: Filesystem Linux asli (`ext4`), bukan lagi pada mount NTFS.
+- **Implikasi Kapasitas & Performa**:
+  - Operasi *cross-join* perbandingan string pendek skala menengah pada fitur `fuzzy_match_master` mode `similarity` (misalnya dataset SIPKA dengan ~53.000 nilai unik sumber × 654 nilai unik master ≈ 34,6 juta kombinasi) dapat dieksekusi dengan aman dan cepat di ClickHouse tanpa kendala memori maupun hambatan I/O mount NTFS.
+  - Batas maksimum kombinasi perbandingan nilai unik (`MAX_FUZZY_PAIR_COMPARISONS` di `server/workbench/ops/fuzzy_match_master.ts`) ditetapkan sebesar **`100_000_000`** (`100.000.000` kombinasi).
+
+## Konfigurasi Lingkungan
+
+Salin `.env.example` dan isi kredensial koneksi ClickHouse sesuai kebutuhan:
+
+```env
+NUXT_CLICKHOUSE_URL=http://localhost:8123
+NUXT_CLICKHOUSE_USER=default
+NUXT_CLICKHOUSE_PASSWORD=
+```
+
+> Jika `NUXT_CLICKHOUSE_URL` tidak diatur, server otomatis menggunakan simulasi ClickHouse *in-memory* untuk keperluan pengembangan/pratinjau.
+
+## Menjalankan Proyek
 
 ```bash
-# npm
+# Instal dependensi
 npm install
 
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
-```
-
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
+# Jalankan server pengembangan (port 3000)
 npm run dev
 
-# pnpm
-pnpm dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
+# Bangun untuk produksi
 npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
 ```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.

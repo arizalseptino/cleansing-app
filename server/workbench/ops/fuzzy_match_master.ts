@@ -7,7 +7,13 @@ import {
 import type { OperationContext, OperationDefinition } from '../types'
 import { buildInputSql, ensureTextColumn, normalizeColumnName } from '../utils'
 
-export const MAX_FUZZY_PAIR_COMPARISONS = 20_000_000
+/**
+ * Batas maksimum kombinasi perbandingan nilai unik (sumber × master).
+ * Server ClickHouse lokal berjalan di filesystem Linux asli (ext4) dengan ClickHouse LTS v26.8.40.8,
+ * sehingga cross-join string pendek skala menengah (mis. ~53.000 sumber × 654 master = ~34,6 juta kombinasi)
+ * dapat dieksekusi dengan aman dan cepat tanpa kendala memori atau I/O mount NTFS.
+ */
+export const MAX_FUZZY_PAIR_COMPARISONS = 100_000_000
 export const FUZZY_MODES = ['similarity', 'keyword'] as const
 export const FUZZY_ALGORITHMS = ['jaro_winkler', 'edit_distance'] as const
 export const FUZZY_NORMALIZATIONS = ['lowercase', 'trim', 'collapse_spaces', 'remove_punctuation'] as const
