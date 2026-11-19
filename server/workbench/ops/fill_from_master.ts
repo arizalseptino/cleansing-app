@@ -1,6 +1,12 @@
 import type { OperationDefinition } from '../types'
-import { buildFillEmptyPlan } from '../../features/fill-empty-from-master-query'
-import { ensureTextColumn, quoteIdentifier } from '../utils'
+import { buildFillFromMasterWorkbenchSql } from '../../features/fill-empty-from-master-query'
+import {
+  requiredParameter,
+  validateDatabase,
+  validateTable,
+  validateTextColumn,
+} from '../../features/metadata'
+import { ensureTextColumn, safeString } from '../utils'
 
 const fillFromMaster: OperationDefinition = {
   id: 'fill_from_master',
@@ -15,36 +21,57 @@ const fillFromMaster: OperationDefinition = {
     { key: 'masterValueColumn', label: 'Kolom nilai master', description: 'Kolom master yang dipakai sebagai nilai pengisi. Jika kosong, akan dipakai kunci master.', type: 'column', required: false },
   ],
   async validate(context) {
-    const sourceColumn = ensureTextColumn(context.schema, String(context.params.sourceColumn ?? ''), 'Kolom sumber teks')
-    const targetColumn = ensureTextColumn(context.schema, String(context.params.targetColumn ?? ''), 'Kolom target')
+    const sourceColumn = ensureTextColumn(context.schema, safeString(context.params.sourceColumn), 'Kolom sumber teks')
+    const targetColumn = ensureTextColumn(context.schema, safeString(context.params.targetColumn), 'Kolom target')
     if (sourceColumn === targetColumn) {
       throw createError({ statusCode: 400, statusMessage: 'Kolom sumber dan target harus berbeda', message: 'Kolom sumber dan target untuk operasi ini tidak boleh sama.' })
     }
+
+    const masterDatabase = requiredParameter(context.params, 'masterDatabase', 'Database master')
+    const masterTable = requiredParameter(context.params, 'masterTable', 'Tabel master')
+    const masterKeyColumn = requiredParameter(context.params, 'masterKeyColumn', 'Kolom kunci master')
+    const rawMasterValue = context.params.masterValueColumn
+    if (rawMasterValue !== undefined && rawMasterValue !== null && typeof rawMasterValue !== 'string') {
+      throw createError({ statusCode: 400, statusMessage: 'Kolom nilai master tidak valid', message: 'Kolom nilai master harus berupa pilihan kolom teks.' })
+    }
+    const masterValueColumn = typeof rawMasterValue === 'string' && rawMasterValue.trim()
+      ? rawMasterValue.trim()
+      : masterKeyColumn
+
+    await validateDatabase(context.client, masterDatabase)
+    await validateTable(context.client, masterDatabase, masterTable)
+    await Promise.all([
+      validateTextColumn(context.client, masterDatabase, masterTable, masterKeyColumn, 'kunci master'),
+      ...(masterValueColumn === masterKeyColumn
+        ? []
+        : [validateTextColumn(context.client, masterDatabase, masterTable, masterValueColumn, 'nilai master')]),
+    ])
   },
   async compile(context) {
-    const sourceColumn = String(context.params.sourceColumn ?? '')
-    const targetColumn = String(context.params.targetColumn ?? '')
-    const masterDatabase = String(context.params.masterDatabase ?? '')
-    const masterTable = String(context.params.masterTable ?? '')
-    const masterKeyColumn = String(context.params.masterKeyColumn ?? '')
-    const masterValueColumn = String(context.params.masterValueColumn ?? masterKeyColumn)
+    const sourceColumn = ensureTextColumn(context.schema, safeString(context.params.sourceColumn), 'Kolom sumber teks')
+    const targetColumn = ensureTextColumn(context.schema, safeString(context.params.targetColumn), 'Kolom target')
+    const masterDatabase = requiredParameter(context.params, 'masterDatabase', 'Database master')
+    const masterTable = requiredParameter(context.params, 'masterTable', 'Tabel master')
+    const masterKeyColumn = requiredParameter(context.params, 'masterKeyColumn', 'Kolom kunci master')
+    const rawMasterValue = typeof context.params.masterValueColumn === 'string'
+      ? context.params.masterValueColumn.trim()
+      : ''
+    const masterValueColumn = rawMasterValue || masterKeyColumn
 
-    const plan = await buildFillEmptyPlan(context.client, {
-      sourceDatabase: context.source.database,
-      sourceTable: context.source.table,
+    const masterMetadata = await validateTable(context.client, masterDatabase, masterTable)
+    const sql = buildFillFromMasterWorkbenchSql({
       sourceColumn,
       targetColumn,
       masterDatabase,
       masterTable,
-      masterColumn: masterKeyColumn,
-      masterFillColumn: masterValueColumn,
+      masterMetadata,
+      masterKeyColumn,
+      masterValueColumn,
+      schemaColumns: context.schema.map((column) => column.name),
     })
 
-    const targetQuoted = quoteIdentifier(targetColumn)
-    const replacement = `if(${quoteIdentifier(plan.aliases.targetEmpty)} AND ${quoteIdentifier(plan.aliases.category)} = 'fillable', ${quoteIdentifier(plan.aliases.suggestion)}, ${targetQuoted})`
-
     return {
-      sql: `SELECT * REPLACE (${replacement} AS ${targetQuoted}) FROM __INPUT__`,
+      sql,
       params: {},
       touchedColumns: [targetColumn],
       addedColumns: [],
@@ -54,3 +81,4 @@ const fillFromMaster: OperationDefinition = {
 }
 
 export default fillFromMaster
+

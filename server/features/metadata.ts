@@ -121,7 +121,11 @@ export async function validateTextColumn(
     if (!rows[0]) {
       databaseError(`Kolom ${label} tidak ditemukan pada tabel yang dipilih.`, 404)
     }
-    if (!['String', 'Nullable(String)', 'LowCardinality(String)'].includes(rows[0].type)) {
+    let normalizedType = rows[0].type.trim()
+    while (/^(Nullable|LowCardinality)\s*\((.*)\)$/.test(normalizedType)) {
+      normalizedType = normalizedType.replace(/^(Nullable|LowCardinality)\s*\((.*)\)$/, '$2').trim()
+    }
+    if (normalizedType !== 'String') {
       databaseError(`Kolom ${label} harus bertipe teks.`, 400)
     }
   } catch (error) {

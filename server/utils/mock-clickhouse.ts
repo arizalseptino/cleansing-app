@@ -887,6 +887,14 @@ function compareValues(a: unknown, b: unknown): number {
   if (a === b) return 0
   if (a === null || a === undefined) return -1
   if (b === null || b === undefined) return 1
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const len = Math.min(a.length, b.length)
+    for (let i = 0; i < len; i += 1) {
+      const cmp = compareValues(a[i], b[i])
+      if (cmp !== 0) return cmp
+    }
+    return a.length - b.length
+  }
   if (typeof a === 'number' && typeof b === 'number') return a - b
   return String(a).localeCompare(String(b))
 }
@@ -913,6 +921,9 @@ function compileRegex(pattern: string, caseInsensitive = false): RegExp {
 
 function castValue(value: unknown, targetType: string, strict: boolean): unknown {
   const base = targetType.replace(/^(Nullable|LowCardinality)\((.*)\)$/i, '$2').trim()
+  if (/^Array\(/i.test(base) && Array.isArray(value)) {
+    return value
+  }
   if (value === null || value === undefined) {
     return /^Nullable\(/i.test(targetType) ? null : strict ? null : ''
   }
@@ -963,6 +974,8 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
       const t2 = inferExprType(expr.args[2], inputColumns)
       if (t1 === 'Nullable(Nothing)') return t2.startsWith('Nullable(') ? t2 : `Nullable(${t2})`
       if (t2 === 'Nullable(Nothing)') return t1.startsWith('Nullable(') ? t1 : `Nullable(${t1})`
+      if (t1.startsWith('Nullable(')) return t1
+      if (t2.startsWith('Nullable(')) return t2
       return t1
     }
     if (fn === 'trimboth' || fn === 'upperutf8' || fn === 'lowerutf8' || fn === 'initcap' || fn === 'replaceregexpall' || fn === 'any') {

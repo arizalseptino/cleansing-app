@@ -195,29 +195,17 @@ export async function buildFillEmptyPlan(
   const targetField = quoteIdentifier(targetColumn)
   const masterField = quoteIdentifier(masterColumn)
   const masterFillField = quoteIdentifier(masterFillColumn)
-  const masterValues = `
-    (SELECT arraySort(item -> tuple(-lengthUTF8(tupleElement(item, 1)), tupleElement(item, 1), tupleElement(item, 2)),
-                      groupUniqArray((search_key, fill_value)))
-     FROM (
-       SELECT
-         toString(trimBoth(assumeNotNull(${masterField}))) AS search_key,
-         toString(assumeNotNull(${masterFillField})) AS fill_value
-       FROM ${masterIdentifier}${masterFinal}
-       WHERE ${masterField} IS NOT NULL
-         AND notEmpty(trimBoth(${masterField}))
-     ))
-  `
+  const masterValues = buildMasterValuesSubquery(masterIdentifier, masterFinal, masterColumn, masterFillColumn)
 
   function classifyRows(tableIdentifier: string, targetBeforeField: string): string {
     const quotedSourceAlias = quoteIdentifier(aliases.sourceText)
     const targetBefore = targetBeforeField
-    const sourceTrimmed = `trimBoth(ifNull(${sourceField}, ''))`
-    const projectedSourceTrimmed = `trimBoth(ifNull(${quotedSourceAlias}, ''))`
-    const targetEmpty = `(isNull(${targetBefore}) OR trimBoth(ifNull(${targetBefore}, '')) = '')`
+    const sourceTrimmed = `trimBoth(ifNull(toString(${sourceField}), ''))`
+    const projectedSourceTrimmed = `trimBoth(ifNull(toString(${quotedSourceAlias}), ''))`
+    const targetEmpty = `(isNull(${targetBefore}) OR trimBoth(ifNull(toString(${targetBefore}), '')) = '')`
     const matchExpression = `arrayFilter(item -> positionCaseInsensitiveUTF8(${projectedSourceTrimmed}, tupleElement(item, 1)) > 0, master_values)`
-    const matchedKeys = `arrayDistinct(arrayMap(item -> tupleElement(item, 1), ${quoteIdentifier(aliases.bestMatches)}))`
     const matchedFillValues = `arrayDistinct(arrayMap(item -> tupleElement(item, 2), ${quoteIdentifier(aliases.bestMatches)}))`
-    const isAmbiguous = `(length(${matchedKeys}) > 1 AND length(${matchedFillValues}) > 1)`
+    const isAmbiguous = `(length(${matchedFillValues}) > 1)`
     const keyProjection = aliases.keyColumns.map(({ name, valueKey }) => (
       `${quoteIdentifier(name)} AS ${quoteIdentifier(valueKey)}`
     ))
@@ -300,6 +288,120 @@ export async function buildFillEmptyPlan(
     aliases,
     sortingKeyExpression: sorting.expression,
   }
+}
+
+export function buildMasterValuesSubquery(
+  masterIdentifier: string,
+  masterFinal: string,
+  masterColumn: string,
+  masterFillColumn: string,
+): string {
+  const masterField = quoteIdentifier(masterColumn)
+  const masterFillField = quoteIdentifier(masterFillColumn)
+  return `
+    (SELECT arraySort(item -> tuple(-lengthUTF8(tupleElement(item, 1)), tupleElement(item, 1), tupleElement(item, 2)),
+                      groupUniqArray((search_key, fill_value)))
+     FROM (
+       SELECT
+         trimBoth(ifNull(toString(${masterField}), '')) AS search_key,
+         ifNull(toString(${masterFillField}), '') AS fill_value
+       FROM ${masterIdentifier}${masterFinal}
+       WHERE ${masterField} IS NOT NULL
+         AND notEmpty(trimBoth(ifNull(toString(${masterField}), '')))
+     ))
+  `
+}
+
+export function buildFillFromMasterWorkbenchSql(options: {
+  sourceColumn: string
+  targetColumn: string
+  masterDatabase: string
+  masterTable: string
+  masterMetadata: TableMetadata
+  masterKeyColumn: string
+  masterValueColumn: string
+  schemaColumns: string[]
+}): string {
+  const aliasesUsed = new Set(options.schemaColumns)
+  const aliases = {
+    masterValues: allocateAlias('__bd_master_values', aliasesUsed),
+    targetEmpty: allocateAlias('__bd_target_empty', aliasesUsed),
+    sourceFilled: allocateAlias('__bd_source_filled', aliasesUsed),
+    matches: allocateAlias('__bd_matches', aliasesUsed),
+    bestMatches: allocateAlias('__bd_best_matches', aliasesUsed),
+    ambiguous: allocateAlias('__bd_ambiguous', aliasesUsed),
+    suggestion: allocateAlias('__bd_suggested_value', aliasesUsed),
+    category: allocateAlias('__bd_category', aliasesUsed),
+  }
+
+  const masterIdentifier = `${quoteIdentifier(options.masterDatabase)}.${quoteIdentifier(options.masterTable)}`
+  const masterFinal = useFinal(options.masterMetadata) ? ' FINAL' : ''
+  const masterValues = buildMasterValuesSubquery(
+    masterIdentifier,
+    masterFinal,
+    options.masterKeyColumn,
+    options.masterValueColumn,
+  )
+
+  const sourceQuoted = quoteIdentifier(options.sourceColumn)
+  const targetQuoted = quoteIdentifier(options.targetColumn)
+  const masterValuesAlias = quoteIdentifier(aliases.masterValues)
+  const targetEmptyQuoted = quoteIdentifier(aliases.targetEmpty)
+  const sourceFilledQuoted = quoteIdentifier(aliases.sourceFilled)
+  const matchesQuoted = quoteIdentifier(aliases.matches)
+  const bestMatchesQuoted = quoteIdentifier(aliases.bestMatches)
+  const ambiguousQuoted = quoteIdentifier(aliases.ambiguous)
+  const suggestionQuoted = quoteIdentifier(aliases.suggestion)
+  const categoryQuoted = quoteIdentifier(aliases.category)
+
+  const sourceTrimmed = `trimBoth(ifNull(toString(${sourceQuoted}), ''))`
+  const targetEmptyExpr = `(isNull(${targetQuoted}) OR trimBoth(ifNull(toString(${targetQuoted}), '')) = '')`
+  const matchExpr = `arrayFilter(item -> positionCaseInsensitiveUTF8(${sourceTrimmed}, tupleElement(item, 1)) > 0, ${masterValuesAlias})`
+  const bestMatchesExpr = `if(length(${matchesQuoted}) > 0, arrayFilter(item -> lengthUTF8(tupleElement(item, 1)) = lengthUTF8(tupleElement(arrayElement(${matchesQuoted}, 1), 1)), ${matchesQuoted}), CAST([], 'Array(Tuple(String, String))'))`
+  const ambiguousExpr = `(length(arrayDistinct(arrayMap(item -> tupleElement(item, 2), ${bestMatchesQuoted}))) > 1)`
+  const suggestionExpr = `if(length(${bestMatchesQuoted}) > 0 AND NOT ${ambiguousQuoted}, tupleElement(arrayElement(${bestMatchesQuoted}, 1), 2), '')`
+  const categoryExpr = `multiIf(NOT ${targetEmptyQuoted}, '', ${ambiguousQuoted}, 'ambiguous', NOT ${sourceFilledQuoted} OR length(${matchesQuoted}) = 0, 'remainingEmpty', 'fillable')`
+
+  const exceptColumns = [
+    targetEmptyQuoted,
+    sourceFilledQuoted,
+    matchesQuoted,
+    bestMatchesQuoted,
+    ambiguousQuoted,
+    suggestionQuoted,
+    categoryQuoted,
+  ].join(', ')
+
+  const replacement = `if(${targetEmptyQuoted} AND (${categoryQuoted} = 'fillable'), ${suggestionQuoted}, ${targetQuoted})`
+
+  return `
+    SELECT * EXCEPT (${exceptColumns}) REPLACE (${replacement} AS ${targetQuoted})
+    FROM (
+      SELECT
+        *,
+        ${suggestionExpr} AS ${suggestionQuoted},
+        ${categoryExpr} AS ${categoryQuoted}
+      FROM (
+        SELECT
+          *,
+          ${ambiguousExpr} AS ${ambiguousQuoted}
+        FROM (
+          SELECT
+            *,
+            ${bestMatchesExpr} AS ${bestMatchesQuoted}
+          FROM (
+            WITH ${masterValues} AS ${masterValuesAlias}
+            SELECT
+              *,
+              ${targetEmptyExpr} AS ${targetEmptyQuoted},
+              notEmpty(${sourceTrimmed}) AS ${sourceFilledQuoted},
+              ${matchExpr} AS ${matchesQuoted}
+            FROM __INPUT__
+          )
+        )
+      )
+    )
+  `
 }
 
 function numberValue(value: number | string | undefined, label: string): number {
