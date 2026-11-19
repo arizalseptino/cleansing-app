@@ -3,6 +3,7 @@ import type { Pipeline } from '../../workbench/types'
 import { quoteIdentifier } from '../../workbench/utils'
 import { recordCleansingHistory } from '../../features/cleansing-history'
 import { createMergeTreeTableSafe } from '../../features/metadata'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 function badRequest(statusCode: number, statusMessage: string, message: string): never {
   throw createError({ statusCode, statusMessage, message })
@@ -160,7 +161,7 @@ export default defineEventHandler(async (event) => {
       query: `SELECT count() AS total FROM (${compiled.sql})`,
       query_params: compiled.params,
       format: 'JSONEachRow',
-      clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+      clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 120, readonly: 1 }),
     })
     const [pipelineCountRow] = await pipelineCount.json<{ total: number | string }[]>()
     expectedResultRows = countValue(pipelineCountRow?.total, 'jumlah baris hasil pipeline')
@@ -190,7 +191,7 @@ export default defineEventHandler(async (event) => {
     await client.command({
       query: `INSERT INTO ${tableIdentifier} SELECT * FROM (${compiled.sql})`,
       query_params: compiled.params,
-      clickhouse_settings: { max_execution_time: 180 },
+      clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 300 }),
     })
 
     const countResult = await client.query({

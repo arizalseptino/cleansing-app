@@ -964,7 +964,7 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
   }
   if (expr.kind === 'call') {
     const fn = expr.name.toLowerCase()
-    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64') return 'UInt64'
+    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniq' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64') return 'UInt64'
     if (fn === 'isnull' || fn === 'notempty' || fn === 'empty' || fn === 'startswith' || fn === 'match' || fn === 'touint8') return 'UInt8'
     if (fn === 'position' || fn === 'positioncaseinsensitiveutf8' || fn === 'lengthutf8' || fn === 'length') return 'UInt64'
     if (fn === 'jarowinklersimilarity' || fn === 'tofloat64' || fn === 'greatest' || fn === 'least') return 'Float64'
@@ -1456,7 +1456,7 @@ export class MockClickHouseClient {
   private containsAggregate(expr: ExprNode): boolean {
     if (expr.kind === 'call') {
       const fn = expr.name.toLowerCase()
-      if (['count', 'countif', 'sum', 'uniqexact', 'groupuniqarray', 'max', 'min', 'any', 'argmax'].includes(fn)) return true
+      if (['count', 'countif', 'sum', 'uniq', 'uniqexact', 'groupuniqarray', 'max', 'min', 'any', 'argmax'].includes(fn)) return true
       return expr.args.some((a) => this.containsAggregate(a))
     }
     if (expr.kind === 'binary') return this.containsAggregate(expr.left) || this.containsAggregate(expr.right)
@@ -1508,7 +1508,7 @@ export class MockClickHouseClient {
         }
         return bestVal
       }
-      if (fn === 'uniqexact') {
+      if (fn === 'uniqexact' || fn === 'uniq') {
         const seen = new Set(groupRows.map((r) => JSON.stringify(this.evalExpr(expr.args[0], r, ctes))))
         return seen.size
       }

@@ -1,4 +1,5 @@
 import type { useClickHouse } from '../utils/clickhouse'
+import { buildClickHouseQuerySettings } from '../utils/clickhouse'
 import { buildInputSql, getTableColumns, getTableMetadata, isSystemDatabase, quoteIdentifier } from './utils'
 import { operations } from './ops'
 import type { ColumnMetadata, CompiledPipeline, Pipeline, StepSchemaStatus } from './types'
@@ -20,7 +21,7 @@ async function resolveSchema(
     query: `SELECT * FROM (${sql}) LIMIT 0`,
     query_params: params,
     format: 'JSON',
-    clickhouse_settings: { readonly: 1, max_execution_time: 60 },
+    clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 60, readonly: 1 }),
   })
   const json = await result.json<{ meta?: Array<{ name: string; type: string }> }>()
   const meta = json.meta ?? []

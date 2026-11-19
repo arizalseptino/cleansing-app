@@ -6,6 +6,7 @@ import {
   parseFuzzyParams,
 } from '../../workbench/ops/fuzzy_match_master'
 import { buildInputSql, isTextType, quoteIdentifier } from '../../workbench/utils'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 import type { Pipeline } from '../../workbench/types'
 
 type ColumnStatistics = {
@@ -79,7 +80,10 @@ export default defineEventHandler(async (event) => {
   const pairOrder: FuzzyPairOrder = rawPairOrder
 
   const hasFuzzyMatch = pipeline.steps.some((step) => step?.op === 'fuzzy_match_master')
-  const statsSettings = { readonly: 1, max_execution_time: hasFuzzyMatch ? 120 : 30 }
+  const statsSettings = buildClickHouseQuerySettings({
+    max_execution_time: hasFuzzyMatch ? 180 : 120,
+    readonly: 1,
+  })
 
   const client = useClickHouse()
   try {
@@ -205,8 +209,8 @@ export default defineEventHandler(async (event) => {
         .filter((name) => !keys.includes(name))
       const allKeysNull = keySql.map((column) => `isNull(${column})`).join(' AND ')
       const distinctContent = nonKeyColumns.length
-        ? `uniqExact(tuple(${nonKeyColumns.map(quoteIdentifier).join(', ')}))`
-        : 'uniqExact(tuple())'
+        ? `uniq(tuple(${nonKeyColumns.map(quoteIdentifier).join(', ')}))`
+        : 'uniq(tuple())'
       const grouped = await client.query({
         query: `SELECT countIf(group_rows > 1) AS duplicate_groups, sum(if(group_rows > 1, group_rows - 1, 0)) AS discarded_rows, countIf(group_rows > 1 AND distinct_content > 1) AS conflict_groups
 FROM (
@@ -272,7 +276,7 @@ FROM (
           ? `row_count DESC, score ASC, source_value ASC`
           : `if(match_status IN ('exact', 'fuzzy'), 0, 1) ASC, score ASC, row_count DESC, source_value ASC`
 
-      const summaryPromise = client.query({
+      const summaryRes = await client.query({
         query: `
           SELECT
             count() AS unique_source_values,
@@ -287,8 +291,8 @@ FROM (
         clickhouse_settings: statsSettings,
       })
 
-      const routedPromise = parsed.routeUnmatched
-        ? (() => {
+      const routedRes = parsed.routeUnmatched
+        ? await (() => {
             const unmatchedQuoted = quoteIdentifier(parsed.unmatchedColumn)
             const unmatchedEmpty = `(isNull(s.${unmatchedQuoted}) OR trimBoth(ifNull(toString(s.${unmatchedQuoted}), '')) = '')`
             return client.query({
@@ -309,7 +313,7 @@ FROM (
           })()
         : null
 
-      const pairsPromise = client.query({
+      const pairsRes = await client.query({
         query: `
           SELECT
             g.sample_source AS source_value,
@@ -340,12 +344,6 @@ FROM (
         format: 'JSONEachRow',
         clickhouse_settings: statsSettings,
       })
-
-      const [summaryRes, routedRes, pairsRes] = await Promise.all([
-        summaryPromise,
-        routedPromise,
-        pairsPromise,
-      ])
 
       const [summaryRow] = await summaryRes.json<Record<string, number | string>[]>()
       const routedRowsList = routedRes
@@ -395,6 +393,7 @@ FROM (
     }
   } catch (error) {
     if (error && typeof error === 'object' && 'statusCode' in error) throw error
+    console.error('[workbench/stats] ClickHouse error:', error)
     throw createError({
       statusCode: 500,
       statusMessage: 'Statistik tidak dapat dihitung',

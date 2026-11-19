@@ -34,6 +34,25 @@ export type ClickHouseLikeClient = {
   }) => Promise<unknown>
 }
 
+export const CLICKHOUSE_MEMORY_SETTINGS = {
+  max_bytes_before_external_group_by: '2000000000',
+  max_bytes_before_external_sort: '2000000000',
+  join_algorithm: 'auto',
+  max_bytes_in_join: '2000000000',
+  max_memory_usage: '8000000000',
+} as const
+
+export function buildClickHouseQuerySettings(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const { readonly, ...rest } = overrides
+  return {
+    ...CLICKHOUSE_MEMORY_SETTINGS,
+    ...rest,
+    ...(readonly !== undefined ? { readonly } : {}),
+  }
+}
+
 let client: ClickHouseLikeClient | null = null
 
 export function useClickHouse(): ClickHouseLikeClient {
@@ -47,6 +66,9 @@ export function useClickHouse(): ClickHouseLikeClient {
         request_timeout: 600_000,
         keep_alive: {
           enabled: false,
+        },
+        clickhouse_settings: {
+          ...CLICKHOUSE_MEMORY_SETTINGS,
         },
       }) as unknown as ClickHouseLikeClient
     } else {

@@ -1,5 +1,6 @@
 import { compilePipeline } from '../../workbench/compiler'
 import { quoteIdentifier } from '../../workbench/utils'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 type DisplayFilter = {
   column: string
@@ -62,7 +63,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const hasFuzzyMatch = Array.isArray(pipeline.steps) && pipeline.steps.some((step: { op?: string }) => step?.op === 'fuzzy_match_master')
-  const previewReadonlySettings = { readonly: 1, max_execution_time: hasFuzzyMatch ? 120 : 30 }
+  const previewReadonlySettings = buildClickHouseQuerySettings({
+    max_execution_time: hasFuzzyMatch ? 180 : 120,
+    readonly: 1,
+  })
 
   const totalRows = await client.query({
     query: `SELECT count() AS total FROM (${previewSql})`,

@@ -6,6 +6,7 @@ import {
 } from '../../features/metadata'
 import type { OperationContext, OperationDefinition } from '../types'
 import { buildInputSql, ensureTextColumn, normalizeColumnName } from '../utils'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 /**
  * Batas maksimum kombinasi perbandingan nilai unik (sumber × master).
@@ -464,15 +465,15 @@ const fuzzyMatchMaster: OperationDefinition = {
 
     const [srcCountRes, mstCountRes] = await Promise.all([
       context.client.query({
-        query: `SELECT uniqExact(${srcNormExpr}) AS total FROM (${inputSql}) WHERE ${srcNonEmpty}`,
+        query: `SELECT uniq(${srcNormExpr}) AS total FROM (${inputSql}) WHERE ${srcNonEmpty}`,
         query_params: inputParams,
         format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 60 },
+        clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 120, readonly: 1 }),
       }),
       context.client.query({
-        query: `SELECT uniqExact(toString(assumeNotNull(${masterField}))) AS total FROM ${masterIdentifier}${masterFinal} WHERE ${masterNonEmpty}`,
+        query: `SELECT uniq(toString(assumeNotNull(${masterField}))) AS total FROM ${masterIdentifier}${masterFinal} WHERE ${masterNonEmpty}`,
         format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 30 },
+        clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 60, readonly: 1 }),
       }),
     ])
 
