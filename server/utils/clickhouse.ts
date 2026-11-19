@@ -40,7 +40,8 @@ export const CLICKHOUSE_MEMORY_SETTINGS = {
   join_algorithm: 'auto',
   max_bytes_in_join: '200000000',
   max_memory_usage: '4000000000',
-  max_threads: 4,
+  max_block_size: '4096',
+  max_threads: 2,
   send_progress_in_http_headers: 1,
   http_headers_progress_interval_ms: '30000',
 } as const

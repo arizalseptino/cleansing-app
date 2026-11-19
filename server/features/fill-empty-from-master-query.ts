@@ -395,7 +395,7 @@ export function buildFillFromMasterWorkbenchSql(options: {
               *,
               ${targetEmptyExpr} AS ${targetEmptyQuoted},
               notEmpty(${sourceTrimmed}) AS ${sourceFilledQuoted},
-              ${matchExpr} AS ${matchesQuoted}
+              if((${targetEmptyExpr}) AND notEmpty(${sourceTrimmed}), ${matchExpr}, CAST([], 'Array(Tuple(String, String))')) AS ${matchesQuoted}
             FROM __INPUT__
           )
         )

@@ -12,6 +12,40 @@ function invalidStep(stepNumber: number, message: string): never {
   })
 }
 
+function getStepReadColumns(op: string, params: Record<string, unknown>, writeColumns: string[]): string[] {
+  const reads = new Set<string>(writeColumns)
+  const addStr = (val: unknown) => {
+    if (typeof val === 'string' && val.trim()) reads.add(val.trim())
+  }
+  if (op === 'trim_text' || op === 'replace_values') {
+    addStr(params.column)
+  } else if (op === 'fill_from_master' || op === 'extract_and_route' || op === 'fuzzy_match_master') {
+    addStr(params.sourceColumn)
+    addStr(params.targetColumn)
+    addStr(params.unmatchedColumn)
+  } else if (op === 'add_column') {
+    addStr(params.orderColumn)
+    if (Array.isArray(params.columns)) {
+      for (const col of params.columns) addStr(col)
+    }
+  } else if (op === 'conditional_rule' && Array.isArray(params.rules)) {
+    for (const rule of params.rules) {
+      if (!rule || typeof rule !== 'object') continue
+      const r = rule as Record<string, unknown>
+      addStr(r.targetColumn)
+      addStr(r.sourceColumn)
+      if (Array.isArray(r.conditions)) {
+        for (const cond of r.conditions) {
+          if (cond && typeof cond === 'object') {
+            addStr((cond as Record<string, unknown>).column)
+          }
+        }
+      }
+    }
+  }
+  return [...reads]
+}
+
 async function resolveSchema(
   client: ReturnType<typeof useClickHouse>,
   sql: string,
@@ -79,14 +113,53 @@ export async function compilePipeline(
     ? `SELECT *, ${sourceColumns.map((column) => `${quoteIdentifier(column)} AS ${quoteIdentifier(`__sumber_${column}`)}`).join(', ')} FROM (${initialSql})`
     : initialSql
   const boundParams: Record<string, unknown> = {}
-  const stepResultSnapshots: Array<{ sql: string; params: Record<string, unknown> }> = []
-  const lastModifiedStepByColumn = new Map<string, number>()
+  const stepEntries: Array<{
+    stepTemplateSql: string
+    readColumns: string[]
+    writeColumns: string[]
+    isRowFilter: boolean
+    requiresFullHistory: boolean
+    snapshotSql: string
+    snapshotParams: Record<string, unknown>
+  }> = []
   const getColumnSourceSql = (column: string): { sql: string; params: Record<string, unknown> } => {
-    const depIndex = lastModifiedStepByColumn.get(column)
-    if (depIndex === undefined || depIndex < 0 || !stepResultSnapshots[depIndex]) {
+    const neededCols = new Set<string>([column])
+    const selectedIndices: number[] = []
+    let fallbackToFullSnapshotAt = -1
+
+    for (let j = stepEntries.length - 1; j >= 0; j -= 1) {
+      const entry = stepEntries[j]
+      if (entry.isRowFilter) continue
+      const writesNeeded = entry.writeColumns.some((col) => neededCols.has(col))
+      if (!writesNeeded) continue
+      if (entry.requiresFullHistory) {
+        fallbackToFullSnapshotAt = j
+        break
+      }
+      selectedIndices.push(j)
+      for (const readCol of entry.readColumns) {
+        neededCols.add(readCol)
+      }
+    }
+
+    if (fallbackToFullSnapshotAt >= 0) {
+      const snap = stepEntries[fallbackToFullSnapshotAt]
+      let slicedSql = snap.snapshotSql
+      for (let k = selectedIndices.length - 1; k >= 0; k -= 1) {
+        slicedSql = stepEntries[selectedIndices[k]].stepTemplateSql.replace(/__INPUT__/g, `(${slicedSql})`)
+      }
+      return { sql: slicedSql, params: { ...boundParams } }
+    }
+
+    if (selectedIndices.length === 0) {
       return { sql: initialSql, params: {} }
     }
-    return stepResultSnapshots[depIndex]
+
+    let slicedSql = initialSql
+    for (let k = selectedIndices.length - 1; k >= 0; k -= 1) {
+      slicedSql = stepEntries[selectedIndices[k]].stepTemplateSql.replace(/__INPUT__/g, `(${slicedSql})`)
+    }
+    return { sql: slicedSql, params: { ...boundParams } }
   }
   const touchedColumns = new Set<string>()
   const addedColumns = new Set<string>()
@@ -155,10 +228,18 @@ export async function compilePipeline(
       currentSql = nextSql
 
       schema = await resolveSchema(client, currentSql, boundParams)
-      stepResultSnapshots[index] = { sql: currentSql, params: { ...boundParams } }
-      for (const col of [...lastStepTouchedColumns, ...lastStepAddedColumns]) {
-        lastModifiedStepByColumn.set(col, index)
-      }
+      const writeColumns = [...new Set([...lastStepTouchedColumns, ...lastStepAddedColumns])]
+      const requiresFullHistory = (step.op === 'add_column' && step.params?.kind === 'sequence')
+        || step.op === 'fuzzy_match_master'
+      stepEntries.push({
+        stepTemplateSql: stepSql,
+        readColumns: getStepReadColumns(step.op, step.params ?? {}, writeColumns),
+        writeColumns,
+        isRowFilter: operation.changesRowCount === true,
+        requiresFullHistory,
+        snapshotSql: currentSql,
+        snapshotParams: { ...boundParams },
+      })
       stepSchemas.push({
         index,
         valid: true,

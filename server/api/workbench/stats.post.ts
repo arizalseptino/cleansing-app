@@ -274,6 +274,24 @@ FROM (
           score: '__fm_score',
         },
       })
+      const matchedMappingSql = buildFuzzyMappingSql({
+        inputSql: `(${input.sql})`,
+        includeUnmatched: false,
+        sourceColumn: parsed.sourceColumn,
+        masterIdentifier,
+        masterFinal,
+        masterColumn: parsed.masterColumn,
+        mode: parsed.mode,
+        algorithm: parsed.algorithm,
+        normalizations: parsed.normalizations,
+        thresholdParamName: 'fm_threshold',
+        aliases: {
+          sNorm: '__fm_s_norm',
+          master: '__fm_master',
+          status: '__fm_status',
+          score: '__fm_score',
+        },
+      })
       const fmParams: Record<string, unknown> = {
         ...input.params,
         ...(parsed.mode === 'similarity' ? { fm_threshold: parsed.threshold } : {}),
@@ -311,12 +329,13 @@ FROM (
             return client.query({
               query: `
                 SELECT
-                  countIf(ifNull(m.__fm_status, '') = 'unmatched' AND ${unmatchedEmpty}) AS routed_rows
+                  countIf(ifNull(m.__fm_status, 'unmatched') = 'unmatched' AND ${unmatchedEmpty}) AS routed_rows
                 FROM (
                   SELECT *, ${srcNormExpr} AS __fm_key
                   FROM (${input.sql})
+                  WHERE ${srcNonEmpty}
                 ) AS s
-                LEFT JOIN (${mappingSql}) AS m
+                LEFT JOIN (${matchedMappingSql}) AS m
                 ON s.__fm_key = m.__fm_s_norm
               `,
               query_params: fmParams,
@@ -331,9 +350,9 @@ FROM (
           SELECT
             g.sample_source AS source_value,
             if(m.__fm_status IN ('exact', 'fuzzy'), m.__fm_master, CAST(NULL, 'Nullable(String)')) AS master_value,
-            m.__fm_score AS score,
+            ifNull(m.__fm_score, toFloat64(0)) AS score,
             g.row_count AS row_count,
-            m.__fm_status AS match_status
+            ifNull(m.__fm_status, 'unmatched') AS match_status
           FROM (
             SELECT
               s_norm,
@@ -348,7 +367,7 @@ FROM (
             )
             GROUP BY s_norm
           ) AS g
-          LEFT JOIN (${mappingSql}) AS m
+          LEFT JOIN (${matchedMappingSql}) AS m
           ON g.s_norm = m.__fm_s_norm
           ORDER BY ${orderByClause}
           LIMIT 50
