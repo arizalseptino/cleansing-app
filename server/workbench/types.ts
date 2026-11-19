@@ -79,6 +79,7 @@ export type OperationContext = {
   }
   inputSql?: string
   inputParams?: Record<string, unknown>
+  getColumnSourceSql?: (column: string) => { sql: string; params: Record<string, unknown> }
 }
 
 export type StepSchemaStatus = {

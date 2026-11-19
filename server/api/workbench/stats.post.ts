@@ -94,6 +94,8 @@ export default defineEventHandler(async (event) => {
     let deduplicateStepIndex = -1
     let fuzzyStepIndex = -1
 
+    let stepInput: Awaited<ReturnType<typeof compilePipeline>> | undefined
+
     if (scope === 'step') {
       const stepNumber = Number('step' in body ? body.step : 1)
       if (!Number.isSafeInteger(stepNumber) || stepNumber < 1 || stepNumber > pipeline.steps.length) {
@@ -107,10 +109,10 @@ export default defineEventHandler(async (event) => {
         ? `__sebelum_${column}`
         : null
 
-      const input = await compilePipeline(client, { ...pipeline, steps: steps.slice(0, -1) })
+      stepInput = await compilePipeline(client, { ...pipeline, steps: steps.slice(0, -1) }, { skipValidation: true })
       const inputRows = await client.query({
-        query: `SELECT count() AS total FROM (${input.sql})`,
-        query_params: input.params,
+        query: `SELECT count() AS total FROM (${stepInput.sql})`,
+        query_params: stepInput.params,
         format: 'JSONEachRow',
         clickhouse_settings: statsSettings,
       })
@@ -125,7 +127,7 @@ export default defineEventHandler(async (event) => {
         initial.sourceSchema.some((sourceColumn) => sourceColumn.name === column),
       )
       compiled = sourceColumns.length
-        ? await compilePipeline(client, pipeline, { includeSourceColumns: sourceColumns })
+        ? await compilePipeline(client, pipeline, { includeSourceColumns: sourceColumns, skipValidation: true })
         : initial
       beforeAlias = (column) => sourceColumns.includes(column) ? `__sumber_${column}` : null
 
@@ -196,10 +198,12 @@ export default defineEventHandler(async (event) => {
     let deduplicateStats: { duplicateGroups: number; discardedRows: number; conflictGroups: number } | undefined
     if (deduplicateStepIndex >= 0) {
       const step = pipeline.steps[deduplicateStepIndex]
-      const input = await compilePipeline(client, {
-        ...pipeline,
-        steps: pipeline.steps.slice(0, deduplicateStepIndex),
-      })
+      const input = scope === 'step' && stepInput
+        ? stepInput
+        : await compilePipeline(client, {
+            ...pipeline,
+            steps: pipeline.steps.slice(0, deduplicateStepIndex),
+          }, { skipValidation: true })
       const keys = Array.isArray(step.params?.keyColumns)
         ? step.params.keyColumns.filter((column): column is string => typeof column === 'string')
         : []
@@ -235,10 +239,12 @@ FROM (
     let fuzzyMatch: FuzzyMatchStatistics | undefined
     if (fuzzyStepIndex >= 0) {
       const step = pipeline.steps[fuzzyStepIndex]
-      const input = await compilePipeline(client, {
-        ...pipeline,
-        steps: pipeline.steps.slice(0, fuzzyStepIndex),
-      })
+      const input = scope === 'step' && stepInput
+        ? stepInput
+        : await compilePipeline(client, {
+            ...pipeline,
+            steps: pipeline.steps.slice(0, fuzzyStepIndex),
+          }, { skipValidation: true })
       const parsed = parseFuzzyParams({ schema: input.schema, params: step.params ?? {} })
       const masterMeta = await validateTable(client, parsed.masterDatabase, parsed.masterTable)
       const masterIdentifier = `${quoteIdentifier(parsed.masterDatabase)}.${quoteIdentifier(parsed.masterTable)}`

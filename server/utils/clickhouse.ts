@@ -35,11 +35,12 @@ export type ClickHouseLikeClient = {
 }
 
 export const CLICKHOUSE_MEMORY_SETTINGS = {
-  max_bytes_before_external_group_by: '2000000000',
-  max_bytes_before_external_sort: '2000000000',
+  max_bytes_before_external_group_by: '500000000',
+  max_bytes_before_external_sort: '500000000',
   join_algorithm: 'auto',
-  max_bytes_in_join: '2000000000',
-  max_memory_usage: '8000000000',
+  max_bytes_in_join: '200000000',
+  max_memory_usage: '4000000000',
+  max_threads: 4,
 } as const
 
 export function buildClickHouseQuerySettings(

@@ -222,6 +222,8 @@ export function parseFuzzyParams(
 
 export function buildFuzzyMappingSql(options: {
   inputSql: string
+  uniqueSourceSql?: string
+  includeUnmatched?: boolean
   sourceColumn: string
   masterIdentifier: string
   masterFinal: string
@@ -244,9 +246,10 @@ export function buildFuzzyMappingSql(options: {
   const srcNonEmpty = `(${srcField} IS NOT NULL AND trimBoth(ifNull(toString(${srcField}), '')) != '' AND ${srcNormExpr} != '')`
   const masterNonEmpty = `(${masterField} IS NOT NULL AND trimBoth(toString(assumeNotNull(${masterField}))) != '' AND ${masterNormExpr} != '')`
 
+  const uniqueSourceInputSql = options.uniqueSourceSql ?? options.inputSql
   const uniqueSourceSubquery = `
     SELECT DISTINCT ${srcNormExpr} AS s_norm
-    FROM ${options.inputSql}
+    FROM ${uniqueSourceInputSql}
     WHERE ${srcNonEmpty}
   `
   const uniqueMasterSubquery = `
@@ -277,6 +280,65 @@ export function buildFuzzyMappingSql(options: {
     pairFilterClause = `WHERE pair_exact = 1 OR pair_score >= {${options.thresholdParamName}:Float64}`
   }
 
+  const matchedBodySql = `
+    SELECT
+      s_norm,
+      best_exact,
+      best_score,
+      length(best_masters) AS best_cnt,
+      arrayElement(best_masters, 1) AS first_master
+    FROM (
+      SELECT
+        s_norm,
+        best_exact,
+        best_score,
+        arrayDistinct(
+          arrayMap(
+            x -> tupleElement(x, 3),
+            arrayFilter(
+              x -> tupleElement(x, 1) = best_exact AND tupleElement(x, 2) = best_score,
+              all_pairs
+            )
+          )
+        ) AS best_masters
+      FROM (
+        SELECT
+          s_norm,
+          max(pair_exact) AS best_exact,
+          max(pair_score) AS best_score,
+          groupUniqArray((pair_exact, pair_score, m_orig)) AS all_pairs
+        FROM (
+          SELECT
+            src_u.s_norm AS s_norm,
+            mst_u.m_orig AS m_orig,
+            if(src_u.s_norm = mst_u.m_norm, toUInt8(1), toUInt8(0)) AS pair_exact,
+            ${pairScoreExpr} AS pair_score
+          FROM (${uniqueSourceSubquery}) AS src_u
+          CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
+          ${options.mode === 'keyword' ? pairFilterClause : ''}
+        )
+        ${options.mode === 'similarity' ? pairFilterClause : ''}
+        GROUP BY s_norm
+      )
+    )
+  `
+
+  if (options.includeUnmatched === false) {
+    return `
+      SELECT
+        s_norm AS ${quoteIdentifier(options.aliases.sNorm)},
+        if(best_cnt = 1, first_master, '') AS ${quoteIdentifier(options.aliases.master)},
+        multiIf(
+          best_cnt = 0, 'unmatched',
+          best_cnt > 1, 'ambiguous',
+          best_exact = 1, 'exact',
+          'fuzzy'
+        ) AS ${quoteIdentifier(options.aliases.status)},
+        best_score AS ${quoteIdentifier(options.aliases.score)}
+      FROM (${matchedBodySql})
+    `
+  }
+
   return `
     SELECT
       u_src.s_norm AS ${quoteIdentifier(options.aliases.sNorm)},
@@ -289,48 +351,7 @@ export function buildFuzzyMappingSql(options: {
       ) AS ${quoteIdentifier(options.aliases.status)},
       ifNull(matched_u.best_score, toFloat64(0)) AS ${quoteIdentifier(options.aliases.score)}
     FROM (${uniqueSourceSubquery}) AS u_src
-    LEFT JOIN (
-      SELECT
-        s_norm,
-        best_exact,
-        best_score,
-        length(best_masters) AS best_cnt,
-        arrayElement(best_masters, 1) AS first_master
-      FROM (
-        SELECT
-          s_norm,
-          best_exact,
-          best_score,
-          arrayDistinct(
-            arrayMap(
-              x -> tupleElement(x, 3),
-              arrayFilter(
-                x -> tupleElement(x, 1) = best_exact AND tupleElement(x, 2) = best_score,
-                all_pairs
-              )
-            )
-          ) AS best_masters
-        FROM (
-          SELECT
-            s_norm,
-            max(pair_exact) AS best_exact,
-            max(pair_score) AS best_score,
-            groupUniqArray((pair_exact, pair_score, m_orig)) AS all_pairs
-          FROM (
-            SELECT
-              src_u.s_norm AS s_norm,
-              mst_u.m_orig AS m_orig,
-              if(src_u.s_norm = mst_u.m_norm, toUInt8(1), toUInt8(0)) AS pair_exact,
-              ${pairScoreExpr} AS pair_score
-            FROM (${uniqueSourceSubquery}) AS src_u
-            CROSS JOIN (${uniqueMasterSubquery}) AS mst_u
-            ${options.mode === 'keyword' ? pairFilterClause : ''}
-          )
-          ${options.mode === 'similarity' ? pairFilterClause : ''}
-          GROUP BY s_norm
-        )
-      )
-    ) AS matched_u
+    LEFT JOIN (${matchedBodySql}) AS matched_u
     ON u_src.s_norm = matched_u.s_norm
   `
 }
@@ -451,8 +472,9 @@ const fuzzyMatchMaster: OperationDefinition = {
       'nama master',
     )
 
-    const inputSql = context.inputSql ?? buildInputSql(context.source)
-    const inputParams = context.inputParams ?? {}
+    const columnSource = context.getColumnSourceSql?.(parsed.sourceColumn)
+    const inputSql = columnSource?.sql ?? context.inputSql ?? buildInputSql(context.source)
+    const inputParams = columnSource?.params ?? context.inputParams ?? {}
     const srcField = quoteIdentifier(parsed.sourceColumn)
     const srcNormExpr = buildNormalizedTextExpr(srcField, parsed.mode, parsed.normalizations)
     const srcNonEmpty = `(${srcField} IS NOT NULL AND trimBoth(ifNull(toString(${srcField}), '')) != '' AND ${srcNormExpr} != '')`
@@ -499,8 +521,11 @@ const fuzzyMatchMaster: OperationDefinition = {
     const statusAlias = allocateAlias('__wb_fuzz_status', usedAliases)
     const scoreAlias = allocateAlias('__wb_fuzz_score', usedAliases)
 
+    const columnSource = context.getColumnSourceSql?.(parsed.sourceColumn)
     const mappingSql = buildFuzzyMappingSql({
       inputSql: '__INPUT__',
+      uniqueSourceSql: columnSource ? `(${columnSource.sql})` : '__INPUT__',
+      includeUnmatched: false,
       sourceColumn: parsed.sourceColumn,
       masterIdentifier,
       masterFinal,
@@ -539,9 +564,10 @@ const fuzzyMatchMaster: OperationDefinition = {
 
     const replacements: string[] = []
     if (parsed.routeUnmatched) {
+      const srcNonEmpty = `(${origSrcQuoted} IS NOT NULL AND trimBoth(ifNull(toString(${origSrcQuoted}), '')) != '' AND ${keyQuoted} != '')`
       const unmatchedQuoted = quoteIdentifier(parsed.unmatchedColumn)
       const unmatchedEmpty = `(isNull(${unmatchedQuoted}) OR trimBoth(ifNull(toString(${unmatchedQuoted}), '')) = '')`
-      const routeCond = `(ifNull(${statusQuoted}, '') = 'unmatched' AND ${unmatchedEmpty})`
+      const routeCond = `(${srcNonEmpty} AND ifNull(${statusQuoted}, 'unmatched') = 'unmatched' AND ${unmatchedEmpty})`
       const nullLiteral = `CAST(NULL, ${typeLiteral(`Nullable(${baseType(targetType)})`)})`
       resultExpr = `multiIf(${matchedCond}, ifNull(${masterValQuoted}, ''), ${routeCond}, ${nullLiteral}, ${fallbackTargetExpr})`
       const unmatchedExpr = `if(${routeCond}, ${origSrcQuoted}, ${unmatchedQuoted})`

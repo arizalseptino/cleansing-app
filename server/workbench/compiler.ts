@@ -35,7 +35,7 @@ async function resolveSchema(
 export async function compilePipeline(
   client: ReturnType<typeof useClickHouse>,
   pipeline: Pipeline,
-  options: { includeBefore?: boolean; includeSourceColumns?: string[] } = {},
+  options: { includeBefore?: boolean; includeSourceColumns?: string[]; skipValidation?: boolean } = {},
 ): Promise<CompiledPipeline> {
   if (!pipeline || !pipeline.source || !pipeline.source.database || !pipeline.source.table) {
     throw createError({
@@ -79,6 +79,15 @@ export async function compilePipeline(
     ? `SELECT *, ${sourceColumns.map((column) => `${quoteIdentifier(column)} AS ${quoteIdentifier(`__sumber_${column}`)}`).join(', ')} FROM (${initialSql})`
     : initialSql
   const boundParams: Record<string, unknown> = {}
+  const stepResultSnapshots: Array<{ sql: string; params: Record<string, unknown> }> = []
+  const lastModifiedStepByColumn = new Map<string, number>()
+  const getColumnSourceSql = (column: string): { sql: string; params: Record<string, unknown> } => {
+    const depIndex = lastModifiedStepByColumn.get(column)
+    if (depIndex === undefined || depIndex < 0 || !stepResultSnapshots[depIndex]) {
+      return { sql: initialSql, params: {} }
+    }
+    return stepResultSnapshots[depIndex]
+  }
   const touchedColumns = new Set<string>()
   const addedColumns = new Set<string>()
   const warnings: string[] = []
@@ -102,8 +111,11 @@ export async function compilePipeline(
         metadata,
         inputSql: currentSql,
         inputParams: { ...boundParams },
+        getColumnSourceSql,
       }
-      await operation.validate(context)
+      if (!options.skipValidation) {
+        await operation.validate(context)
+      }
       const compiled = await operation.compile(context)
       changesRowCount ||= operation.changesRowCount === true
       for (const warning of compiled.warnings ?? []) warnings.push(`Langkah ${index + 1}: ${warning}`)
@@ -143,6 +155,10 @@ export async function compilePipeline(
       currentSql = nextSql
 
       schema = await resolveSchema(client, currentSql, boundParams)
+      stepResultSnapshots[index] = { sql: currentSql, params: { ...boundParams } }
+      for (const col of [...lastStepTouchedColumns, ...lastStepAddedColumns]) {
+        lastModifiedStepByColumn.set(col, index)
+      }
       stepSchemas.push({
         index,
         valid: true,
