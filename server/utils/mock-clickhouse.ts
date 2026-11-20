@@ -12,6 +12,7 @@ type MockTable = {
   name: string
   engine: string
   sorting_key: string
+  version_column?: string
   columns: MockColumn[]
   rows: Record<string, unknown>[]
 }
@@ -80,8 +81,8 @@ type SelectProjection =
   | { kind: 'expr'; expr: ExprNode; alias: string }
 
 type FromSource =
-  | { kind: 'table'; database: string; table: string; alias?: string }
-  | { kind: 'subquery'; query: QueryNode; alias?: string }
+  | { kind: 'table'; database: string; table: string; alias?: string; final?: boolean }
+  | { kind: 'subquery'; query: QueryNode; alias?: string; final?: boolean }
 
 type JoinClause = {
   type: 'LEFT' | 'CROSS' | 'INNER'
@@ -458,7 +459,10 @@ class SqlParser {
         source = { kind: 'table', database: 'default', table: firstName }
       }
     }
-    this.matchKeyword('FINAL')
+    const hasFinal = this.matchKeyword('FINAL')
+    if (hasFinal) {
+      source.final = true
+    }
     if (this.matchKeyword('AS')) {
       const aliasTok = this.next()
       if (aliasTok?.type === 'ident') source.alias = aliasTok.value
@@ -469,6 +473,9 @@ class SqlParser {
         this.next()
         source.alias = next.value
       }
+    }
+    if (!hasFinal && this.matchKeyword('FINAL')) {
+      source.final = true
     }
     return source
   }
@@ -1041,8 +1048,9 @@ function inferExprType(expr: ExprNode, inputColumns: MockColumn[]): string {
   }
   if (expr.kind === 'call') {
     const fn = expr.name.toLowerCase()
-    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniq' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64') return 'UInt64'
+    if (fn === 'row_number' || fn === 'count' || fn === 'countif' || fn === 'uniq' || fn === 'uniqexact' || fn === 'editdistanceutf8' || fn === 'editdistance' || fn === 'touint64' || fn === 'tounixtimestamp64milli') return 'UInt64'
     if (fn === 'toint64') return 'Int64'
+    if (fn === 'fromunixtimestamp64milli') return 'DateTime64(3)'
     if (fn === 'toint64ornull') return 'Nullable(Int64)'
     if (fn === 'tofloat64ornull') return 'Nullable(Float64)'
     if (fn === 'todateornull') return 'Nullable(Date)'
@@ -1200,7 +1208,7 @@ export class MockClickHouseClient {
     return []
   }
 
-  private getTable(database: string, table: string): EvalResult {
+  private getTable(database: string, table: string, final = false): EvalResult {
     if (database.toLowerCase() === 'system') {
       const sysCols: Record<string, MockColumn[]> = {
         databases: [{ name: 'name', type: 'String' }],
@@ -1231,9 +1239,34 @@ export class MockClickHouseClient {
     if (!tbl) {
       throw new Error(`Table ${database}.${table} does not exist`)
     }
+    let rows = tbl.rows.map((r) => ({ ...r }))
+    if (final && /ReplacingMergeTree/i.test(tbl.engine)) {
+      const keyCols = tbl.sorting_key
+        .replace(/^\(|\)$/g, '')
+        .split(',')
+        .map((s) => s.replace(/`/g, '').trim())
+        .filter((s) => s && s.toLowerCase() !== 'tuple()')
+      if (keyCols.length > 0) {
+        const bestByKey = new Map<string, { row: Record<string, unknown>; ver: number; idx: number }>()
+        rows.forEach((row, idx) => {
+          const key = JSON.stringify(keyCols.map((c) => row[c] ?? null))
+          const rawVer = tbl.version_column ? row[tbl.version_column] : idx
+          const ver = typeof rawVer === 'number'
+            ? rawVer
+            : typeof rawVer === 'string' && !Number.isNaN(Date.parse(rawVer))
+              ? Date.parse(rawVer)
+              : idx
+          const prev = bestByKey.get(key)
+          if (!prev || ver > prev.ver || (ver === prev.ver && idx > prev.idx)) {
+            bestByKey.set(key, { row, ver, idx })
+          }
+        })
+        rows = [...bestByKey.values()].map((item) => item.row)
+      }
+    }
     return {
       columns: tbl.columns.map((c) => ({ ...c })),
-      rows: tbl.rows.map((r) => ({ ...r })),
+      rows,
     }
   }
 
@@ -1573,6 +1606,16 @@ export class MockClickHouseClient {
       if (typeof val === 'number') return new Date(val * 1000).toISOString()
       return String(val ?? '')
     }
+    if (fn === 'fromunixtimestamp64milli') {
+      const val = Number(this.evalExpr(args[0], row, ctes) ?? 0)
+      return Number.isFinite(val) ? new Date(val).toISOString() : new Date(0).toISOString()
+    }
+    if (fn === 'tounixtimestamp64milli') {
+      const val = this.evalExpr(args[0], row, ctes)
+      if (typeof val === 'number') return Math.trunc(val)
+      const parsed = Date.parse(String(val ?? ''))
+      return Number.isFinite(parsed) ? parsed : 0
+    }
     if (fn === 'todateornull') {
       const val = this.evalExpr(args[0], row, ctes)
       return parseMockIsoDate(val)
@@ -1705,7 +1748,7 @@ export class MockClickHouseClient {
 
   private evalFromSource(source: FromSource, ctes: Map<string, unknown>): EvalResult {
     if (source.kind === 'table') {
-      return this.getTable(source.database, source.table)
+      return this.getTable(source.database, source.table, Boolean(source.final))
     }
     return this.evalQuery(source.query, ctes)
   }
@@ -2139,7 +2182,8 @@ export class MockClickHouseClient {
     }
   }
 
-  async command({ query, query_params = {} }: CommandInput): Promise<void> {
+  async command({ query, query_params = {} }: CommandInput): Promise<{ query_id: string; summary?: { written_rows?: string } } | void> {
+    const qid = randomUUID()
     const trimmed = query.trim()
 
     if (/^KILL\s+QUERY/i.test(trimmed)) {
@@ -2286,9 +2330,10 @@ export class MockClickHouseClient {
 
       const after = trimmed.slice(closeParen + 1)
       const afterNoSettings = after.replace(/\s+SETTINGS\s+[\s\S]*$/i, '')
-      const engineMatch = /ENGINE\s*=?\s*([A-Za-z0-9_]+)/i.exec(afterNoSettings)
+      const engineMatch = /ENGINE\s*=?\s*([A-Za-z0-9_]+)(?:\s*\(\s*`?([A-Za-z0-9_]+)`?\s*\))?/i.exec(afterNoSettings)
       const orderMatch = /ORDER\s+BY\s+(.+)$/i.exec(afterNoSettings)
       const engine = engineMatch?.[1] ?? 'MergeTree'
+      const version_column = engineMatch?.[2]
       const sorting_key = orderMatch?.[1]?.replace(/`/g, '').trim() ?? 'tuple()'
 
       if (!this.databases.has(database)) this.databases.set(database, new Map())
@@ -2297,7 +2342,7 @@ export class MockClickHouseClient {
         if (ifNotExists) return
         throw new Error(`Table ${database}.${table} already exists`)
       }
-      db.set(table, { name: table, engine, sorting_key, columns, rows: [] })
+      db.set(table, { name: table, engine, sorting_key, version_column, columns, rows: [] })
       return
     }
 
@@ -2338,7 +2383,7 @@ export class MockClickHouseClient {
           valuesParser.expectPunct(')')
         }
         tbl.rows.push(row)
-        return
+        return { query_id: qid, summary: { written_rows: '1' } }
       }
 
       const selectParser = new SqlParser(tokens.slice(i), query_params)
@@ -2356,7 +2401,9 @@ export class MockClickHouseClient {
         })
         tbl.rows.push(record)
       }
+      return { query_id: qid, summary: { written_rows: String(res.rows.length) } }
     }
+    return { query_id: qid }
   }
 
   async insert({ table, values, format = 'CSVWithNames', columns, clickhouse_settings = {} }: InsertInput): Promise<void> {

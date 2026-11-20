@@ -1,9 +1,23 @@
 import { compilePipeline } from '../../workbench/compiler'
-import type { PipelineStep } from '../../workbench/types'
-import { isTextType, quoteIdentifier, readonlySettings } from '../../workbench/utils'
+import {
+  getRareValuesMaxExecutionTime,
+  isRareValuesTimeoutError,
+  parseRareValuesRequest,
+} from '../../workbench/rare-values'
+import { isTextType, quoteIdentifier } from '../../workbench/utils'
+import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 function badRequest(statusCode: number, statusMessage: string, message: string): never {
   throw createError({ statusCode, statusMessage, message })
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown }
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || err.code === 'ECONNRESET') return true
+  if (typeof err.message === 'string' && /\b(abort(?:ed)?|cancel(?:led)?)\b/i.test(err.message)) return true
+  if (err.cause && err.cause !== error) return isAbortError(err.cause)
+  return false
 }
 
 export default defineEventHandler(async (event) => {
@@ -14,87 +28,81 @@ export default defineEventHandler(async (event) => {
     badRequest(400, 'Payload tidak valid', 'Body harus berupa JSON yang valid.')
   }
 
-  if (!body || typeof body !== 'object' || !('source' in body) || !('steps' in body)) {
-    badRequest(400, 'Payload tidak valid', 'Body harus berisi source dan steps.')
-  }
-
-  const record = body as Record<string, unknown>
-  if (!record.source || typeof record.source !== 'object' || !Array.isArray(record.steps)) {
-    badRequest(400, 'Payload tidak valid', 'Sumber data dan daftar langkah wajib valid.')
-  }
-
-  const steps = record.steps as PipelineStep[]
-  const upTo = record.upTo === undefined ? steps.length : Number(record.upTo)
-  if (!Number.isSafeInteger(upTo) || upTo < 0 || upTo > steps.length) {
-    badRequest(400, 'Langkah acuan tidak valid', 'Parameter upTo harus berada di antara 0 dan jumlah langkah pipeline.')
-  }
-
-  const column = typeof record.column === 'string' ? record.column : ''
-  if (!column.trim()) {
-    badRequest(400, 'Kolom wajib dipilih', 'Pilih kolom teks untuk mengecek nilai frekuensi rendah.')
-  }
-
-  const threshold = record.threshold === undefined ? 10 : Number(record.threshold)
-  if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > 1000) {
-    badRequest(400, 'Ambang N tidak valid', 'Ambang kemunculan N harus berupa bilangan bulat antara 1 dan 1000.')
-  }
-
-  const limit = record.limit === undefined ? 100 : Number(record.limit)
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
-    badRequest(400, 'Batas daftar tidak valid', 'Batas daftar nilai frekuensi rendah harus berupa bilangan bulat antara 1 dan 200.')
-  }
-
-  const search = record.search === undefined ? '' : record.search
-  if (typeof search !== 'string' || search.length > 200) {
-    badRequest(400, 'Pencarian tidak valid', 'Kata pencarian harus berupa teks dengan panjang maksimal 200 karakter.')
-  }
-
-  const excludeNull = record.excludeNull === undefined ? false : record.excludeNull
-  const excludeEmpty = record.excludeEmpty === undefined ? false : record.excludeEmpty
-  if (typeof excludeNull !== 'boolean' || typeof excludeEmpty !== 'boolean') {
-    badRequest(400, 'Opsi pengecualian tidak valid', 'Opsi pengecualian NULL dan string kosong harus berupa boolean.')
-  }
-
-  const client = useClickHouse()
-  const compiled = await compilePipeline(client, {
-    source: record.source as { database: string; table: string },
-    steps: steps.slice(0, upTo),
+  const parsed = parseRareValuesRequest(body)
+  const { source, steps, upTo, column, threshold, limit, search, excludeNull, excludeEmpty } = parsed
+  const activeSteps = steps.slice(0, upTo)
+  const maxExecutionTimeSec = getRareValuesMaxExecutionTime(activeSteps)
+  const rareReadonlySettings = buildClickHouseQuerySettings({
+    max_execution_time: maxExecutionTimeSec,
+    readonly: 1,
   })
 
-  const columnMeta = compiled.schema.find((item) => item.name === column)
-  if (!columnMeta) {
-    badRequest(404, 'Kolom tidak ditemukan', `Kolom "${column}" tidak ditemukan pada keluaran langkah ke-${upTo}.`)
-  }
-  if (!isTextType(columnMeta.type)) {
-    badRequest(400, 'Kolom harus bertipe teks', `Kolom "${column}" (${columnMeta.type}) bukan kolom bertipe teks.`)
-  }
+  const abortController = new AbortController()
+  let timedOut = false
+  let clientClosed = false
 
-  const quoted = quoteIdentifier(columnMeta.name)
-  const baseWhereConditions: string[] = []
-  const queryParams: Record<string, unknown> = {
-    ...compiled.params,
-    rv_threshold: threshold,
-    rv_limit: limit,
+  const onResponseClose = () => {
+    if (!event.node.res.writableFinished) {
+      clientClosed = true
+      abortController.abort()
+    }
   }
+  const onRequestAborted = () => {
+    clientClosed = true
+    abortController.abort()
+  }
+  event.node.res.on('close', onResponseClose)
+  event.node.req.on('aborted', onRequestAborted)
 
-  if (excludeNull) {
-    baseWhereConditions.push(`NOT isNull(${quoted})`)
-  }
-  if (excludeEmpty) {
-    baseWhereConditions.push(`(isNull(${quoted}) OR toString(${quoted}) != '')`)
-  }
-  const listWhereConditions = [...baseWhereConditions]
-  if (search.length > 0) {
-    queryParams.rv_search = search
-    listWhereConditions.push(
-      `positionCaseInsensitiveUTF8(if(isNull(${quoted}), '(NULL)', if(toString(${quoted}) = '', '(kosong)', toString(${quoted}))), {rv_search:String}) > 0`,
-    )
-  }
-
-  const baseWhereClause = baseWhereConditions.length ? `WHERE ${baseWhereConditions.join(' AND ')}` : ''
-  const whereClause = listWhereConditions.length ? `WHERE ${listWhereConditions.join(' AND ')}` : ''
+  const timeoutGuard = setTimeout(() => {
+    timedOut = true
+    abortController.abort()
+  }, (maxExecutionTimeSec + 5) * 1000)
+  timeoutGuard.unref?.()
 
   try {
+    const client = useClickHouse()
+    // Kompilasi pipeline PENUH (tanpa sourceLimit) agar dihitung dari seluruh data
+    const compiled = await compilePipeline(client, {
+      source,
+      steps: activeSteps,
+    }, {
+      abortSignal: abortController.signal,
+    })
+
+    const columnMeta = compiled.schema.find((item) => item.name === column)
+    if (!columnMeta) {
+      badRequest(404, 'Kolom tidak ditemukan', `Kolom "${column}" tidak ditemukan pada keluaran langkah ke-${upTo}.`)
+    }
+    if (!isTextType(columnMeta.type)) {
+      badRequest(400, 'Kolom harus bertipe teks', `Kolom "${column}" (${columnMeta.type}) bukan kolom bertipe teks.`)
+    }
+
+    const quoted = quoteIdentifier(columnMeta.name)
+    const baseWhereConditions: string[] = []
+    const queryParams: Record<string, unknown> = {
+      ...compiled.params,
+      rv_threshold: threshold,
+      rv_limit: limit,
+    }
+
+    if (excludeNull) {
+      baseWhereConditions.push(`NOT isNull(${quoted})`)
+    }
+    if (excludeEmpty) {
+      baseWhereConditions.push(`(isNull(${quoted}) OR toString(${quoted}) != '')`)
+    }
+    const listWhereConditions = [...baseWhereConditions]
+    if (search.length > 0) {
+      queryParams.rv_search = search
+      listWhereConditions.push(
+        `positionCaseInsensitiveUTF8(if(isNull(${quoted}), '(NULL)', if(toString(${quoted}) = '', '(kosong)', toString(${quoted}))), {rv_search:String}) > 0`,
+      )
+    }
+
+    const baseWhereClause = baseWhereConditions.length ? `WHERE ${baseWhereConditions.join(' AND ')}` : ''
+    const whereClause = listWhereConditions.length ? `WHERE ${listWhereConditions.join(' AND ')}` : ''
+
     const [listResult, summaryResult] = await Promise.all([
       client.query({
         query: `
@@ -111,7 +119,8 @@ export default defineEventHandler(async (event) => {
         `,
         query_params: queryParams,
         format: 'JSONEachRow',
-        clickhouse_settings: readonlySettings,
+        clickhouse_settings: rareReadonlySettings,
+        abort_signal: abortController.signal,
       }),
       client.query({
         query: `
@@ -128,7 +137,8 @@ export default defineEventHandler(async (event) => {
         `,
         query_params: queryParams,
         format: 'JSONEachRow',
-        clickhouse_settings: readonlySettings,
+        clickhouse_settings: rareReadonlySettings,
+        abort_signal: abortController.signal,
       }),
     ])
 
@@ -145,6 +155,8 @@ export default defineEventHandler(async (event) => {
       upTo,
       threshold,
       limit,
+      computedFromFullData: true,
+      maxExecutionTimeSec,
       items: listRows.map((row) => {
         const isNull = Number(row.is_null) === 1
         const textVal = String(row.val ?? '')
@@ -163,11 +175,28 @@ export default defineEventHandler(async (event) => {
       },
     }
   } catch (error) {
+    if (timedOut || isRareValuesTimeoutError(error)) {
+      throw createError({
+        statusCode: 504,
+        statusMessage: 'Batas waktu perhitungan terlampaui',
+        message: `Perhitungan nilai frekuensi rendah dari seluruh data melebihi batas waktu (${maxExecutionTimeSec} detik). Perhitungan tidak dialihkan ke sampel; persempit langkah pipeline atau gunakan kata pencarian.`,
+      })
+    }
+    if (clientClosed || isAbortError(error)) {
+      if (!event.node.res.headersSent) {
+        setResponseStatus(event, 499, 'Client Closed Request')
+      }
+      return { aborted: true }
+    }
     if (error && typeof error === 'object' && 'statusCode' in error) throw error
     throw createError({
       statusCode: 500,
       statusMessage: 'Gagal menganalisis nilai frekuensi rendah',
-      message: 'Analisis nilai frekuensi rendah tidak dapat dihitung melalui ClickHouse.',
+      message: 'Analisis nilai frekuensi rendah dari seluruh data tidak dapat dihitung melalui ClickHouse.',
     })
+  } finally {
+    clearTimeout(timeoutGuard)
+    event.node.res.off('close', onResponseClose)
+    event.node.req.off('aborted', onRequestAborted)
   }
 })

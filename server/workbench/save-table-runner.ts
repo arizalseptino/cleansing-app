@@ -3,6 +3,11 @@ import type { ColumnMetadata, Pipeline, SourceReference } from './types'
 import { getTableMetadata, quoteIdentifier } from './utils'
 import { recordCleansingHistory } from '../features/cleansing-history'
 import { createMergeTreeTableSafe, createStagingTableFromSelectSafe } from '../features/metadata'
+import {
+  dropRegisteredTempTable,
+  recordTempTableStatus,
+  startTempTableHeartbeat,
+} from '../features/temp-table-registry'
 import { buildClickHouseQuerySettings } from '../utils/clickhouse'
 import type { SaveTableResult } from './save-jobs'
 
@@ -23,6 +28,26 @@ export type SaveTableProgressUpdate = {
   message: string
 }
 
+export type FinalIntegrityInput = {
+  expectedResultRows: number
+  writtenRows: number | null
+  actualResultRows: number
+  compiledSchema: ColumnMetadata[]
+  actualColumns: ColumnMetadata[]
+  expectedOriginalColumns: ColumnMetadata[]
+}
+
+export type FinalIntegrityReport = {
+  barisDiharapkan: number
+  barisTertulis: number | null
+  barisTabelSementara: number
+  skemaCocok: boolean
+  kolomAsliCocok: boolean
+  jumlahKolom: number
+  kolomAsli: string[]
+  ringkasan: string
+}
+
 function badRequest(statusCode: number, statusMessage: string, message: string): never {
   throw createError({ statusCode, statusMessage, message })
 }
@@ -41,6 +66,96 @@ function countValue(value: number | string | undefined, label: string): number {
     badRequest(500, 'Hasil verifikasi tidak valid', `ClickHouse mengembalikan ${label} yang tidak valid.`)
   }
   return parsed
+}
+
+export function verifyFinalTableIntegrity(input: FinalIntegrityInput): FinalIntegrityReport {
+  const {
+    expectedResultRows,
+    writtenRows,
+    actualResultRows,
+    compiledSchema,
+    actualColumns,
+    expectedOriginalColumns,
+  } = input
+
+  // (b) Tabel tidak kosong kecuali pipeline memang menghasilkan 0 baris
+  if (actualResultRows === 0 && expectedResultRows > 0) {
+    badRequest(
+      500,
+      'Verifikasi kekosongan tabel gagal',
+      `Tabel sementara hasil kosong (0 baris), padahal pipeline menghasilkan ${expectedResultRows} baris.`,
+    )
+  }
+
+  // (a) Jumlah baris tabel sementara sama dengan jumlah baris tertulis hasil INSERT dan hitungan pipeline
+  if (writtenRows !== null && actualResultRows !== writtenRows) {
+    badRequest(
+      500,
+      'Verifikasi jumlah baris tertulis gagal',
+      `Jumlah baris tabel sementara (${actualResultRows}) berbeda dari baris tertulis hasil INSERT (${writtenRows}).`,
+    )
+  }
+
+  if (actualResultRows !== expectedResultRows) {
+    badRequest(
+      500,
+      'Verifikasi jumlah baris gagal',
+      `Jumlah baris tabel sementara (${actualResultRows}) berbeda dari hitungan pipeline (${expectedResultRows}).`,
+    )
+  }
+
+  // (c) Skema (nama dan tipe kolom) sama dengan skema akhir hasil kompilasi (LIMIT 0)
+  if (actualColumns.length === 0 || actualColumns.length !== compiledSchema.length) {
+    badRequest(
+      500,
+      'Verifikasi skema akhir gagal',
+      `Jumlah kolom tabel sementara (${actualColumns.length}) tidak sama dengan skema akhir hasil kompilasi (${compiledSchema.length}).`,
+    )
+  }
+
+  for (let i = 0; i < compiledSchema.length; i += 1) {
+    const expectedCol = compiledSchema[i]!
+    const actualCol = actualColumns[i]!
+    if (actualCol.name !== expectedCol.name || actualCol.type.trim() !== expectedCol.type.trim()) {
+      badRequest(
+        500,
+        'Verifikasi skema akhir gagal',
+        `Kolom ke-${i + 1} pada tabel sementara (${actualCol.name}: ${actualCol.type}) tidak sama dengan skema hasil kompilasi (${expectedCol.name}: ${expectedCol.type}).`,
+      )
+    }
+  }
+
+  // (d) Setiap kolom <kolom>_asli yang diharapkan benar-benar ada dengan tipe yang sesuai
+  for (const expectedOrig of expectedOriginalColumns) {
+    const found = actualColumns.find((col) => col.name === expectedOrig.name)
+    if (!found || found.type.trim() !== expectedOrig.type.trim()) {
+      badRequest(
+        500,
+        'Verifikasi nilai asli gagal',
+        `Kolom nilai asli "${expectedOrig.name}" (${expectedOrig.type}) tidak ditemukan dengan tipe yang sesuai pada tabel sementara.`,
+      )
+    }
+  }
+
+  const origNames = expectedOriginalColumns.map((col) => col.name)
+  const writtenPart = writtenRows !== null ? ` dan sesuai baris tertulis INSERT (${writtenRows})` : ''
+  const origPart = origNames.length
+    ? `${origNames.length} kolom nilai asli terverifikasi (${origNames.join(', ')})`
+    : 'tanpa kolom nilai asli'
+  const ringkasan = expectedResultRows === 0
+    ? `Verifikasi lulus: pipeline menghasilkan 0 baris, skema ${compiledSchema.length} kolom sesuai kompilasi LIMIT 0, ${origPart}.`
+    : `Verifikasi lulus: ${actualResultRows} baris sesuai hitungan pipeline (${expectedResultRows})${writtenPart}, skema ${compiledSchema.length} kolom sesuai kompilasi LIMIT 0, ${origPart}.`
+
+  return {
+    barisDiharapkan: expectedResultRows,
+    barisTertulis: writtenRows,
+    barisTabelSementara: actualResultRows,
+    skemaCocok: true,
+    kolomAsliCocok: true,
+    jumlahKolom: compiledSchema.length,
+    kolomAsli: origNames,
+    ringkasan,
+  }
 }
 
 export function parseSaveTableRequest(body: unknown): ParsedSaveTableRequest {
@@ -135,23 +250,63 @@ export async function executeStagedSaveTable(
     historyParameters,
   } = parsed
 
-  const createdStagingTables = new Set<string>()
+  const activeTempTables = new Map<string, { createdAtMs: number }>()
   let sourceRows = 0
   let expectedResultRows = 0
   let resultRows = 0
-  let resultTableCreated = false
   let success = false
   let historyMessage: string | null = null
+  let verificationReport: FinalIntegrityReport | null = null
 
-  const dropStagingTable = async (stageTable: string) => {
+  const stopHeartbeat = startTempTableHeartbeat(
+    client,
+    () => [...activeTempTables.entries()].map(([table, meta]) => ({
+      jobId,
+      jenis: 'save' as const,
+      database: sourceDatabase,
+      table,
+      createdAtMs: meta.createdAtMs,
+    })),
+    15_000,
+  )
+
+  const registerTempRunning = async (tableName: string) => {
+    const createdAtMs = await recordTempTableStatus(client, {
+      jobId,
+      jenis: 'save',
+      database: sourceDatabase,
+      table: tableName,
+      status: 'running',
+    })
+    activeTempTables.set(tableName, { createdAtMs })
+  }
+
+  const finalizeAndDropTempTable = async (tableName: string, finalStatus: 'done' | 'failed') => {
+    const meta = activeTempTables.get(tableName)
+    if (!meta) return
     try {
-      await client.command({
-        query: `DROP TABLE IF EXISTS ${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(stageTable)}`,
-        clickhouse_settings: { max_execution_time: 60 },
+      await recordTempTableStatus(client, {
+        jobId,
+        jenis: 'save',
+        database: sourceDatabase,
+        table: tableName,
+        status: finalStatus,
+        createdAtMs: meta.createdAtMs,
       })
-      createdStagingTables.delete(stageTable)
+    } catch (statusErr) {
+      console.warn(`Gagal mencatat status ${finalStatus} tabel sementara ${sourceDatabase}.${tableName}:`, statusErr)
+    }
+
+    try {
+      await dropRegisteredTempTable(client, {
+        jobId,
+        database: sourceDatabase,
+        table: tableName,
+        maxExecutionTimeSec: 60,
+      })
+      activeTempTables.delete(tableName)
     } catch (dropErr) {
-      console.warn(`Gagal menghapus tabel staging ${sourceDatabase}.${stageTable}:`, dropErr)
+      console.warn(`Gagal menghapus tabel sementara ${sourceDatabase}.${tableName}:`, dropErr)
     }
   }
 
@@ -230,7 +385,7 @@ export async function executeStagedSaveTable(
 
       const stageTableName = `__tmp_stage_${jobId}_${index}`
       const stageIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(stageTableName)}`
-      createdStagingTables.add(stageTableName)
+      await registerTempRunning(stageTableName)
 
       await createStagingTableFromSelectSafe(
         client,
@@ -241,7 +396,7 @@ export async function executeStagedSaveTable(
       )
 
       if (previousStageTable) {
-        await dropStagingTable(previousStageTable)
+        await finalizeAndDropTempTable(previousStageTable, 'done')
       }
 
       previousStageTable = stageTableName
@@ -252,7 +407,7 @@ export async function executeStagedSaveTable(
     onProgress?.({
       currentStep: totalSteps,
       totalSteps,
-      message: 'Menyimpan tabel hasil akhir...',
+      message: 'Memverifikasi integritas dan menyiapkan tabel hasil...',
     })
 
     const finalStageIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(currentSource.table)}`
@@ -263,17 +418,6 @@ export async function executeStagedSaveTable(
     })
     const [stageCountRow] = await stageCount.json<{ total: number | string }[]>()
     expectedResultRows = countValue(stageCountRow?.total, 'jumlah baris hasil pipeline')
-
-    const existingBeforeCreate = await client.query({
-      query: 'SELECT name FROM system.tables WHERE database = {database:String} AND name = {table:String} LIMIT 1',
-      query_params: { database: sourceDatabase, table: resultTableName },
-      format: 'JSONEachRow',
-      clickhouse_settings: { readonly: 1, max_execution_time: 15 },
-    })
-    const foundBeforeCreate = await existingBeforeCreate.json<{ name: string }[]>()
-    if (foundBeforeCreate.length > 0) {
-      badRequest(409, 'Tabel hasil sudah ada', 'Nama tabel hasil sudah digunakan. Pilih nama lain agar tabel yang sudah ada tidak diubah.')
-    }
 
     const originalSourcePrefix = '__sumber_'
     const includedOriginalColumns = originalColumns.filter((column) =>
@@ -290,17 +434,6 @@ export async function executeStagedSaveTable(
       return column
     })
 
-    const tableIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(resultTableName)}`
-    const columnSql = finalSchema.map((column) => `${quoteIdentifier(column.name)} ${column.type}`).join(', ')
-    const orderByClause = orderBy.length ? quoteIdentifier(orderBy[0]!) : 'tuple()'
-
-    await createMergeTreeTableSafe(
-      client,
-      `CREATE TABLE ${tableIdentifier} (${columnSql}) ENGINE ${engine} ORDER BY ${orderByClause}`,
-      900,
-    )
-    resultTableCreated = true
-
     const finalSelectExprs = lastStageSchema.map((column) => {
       if (column.name.startsWith(originalSourcePrefix)) {
         const baseName = column.name.slice(originalSourcePrefix.length)
@@ -312,49 +445,106 @@ export async function executeStagedSaveTable(
     })
     const finalSelectSql = `SELECT ${finalSelectExprs.join(', ')} FROM ${finalStageIdentifier}`
 
-    await client.command({
-      query: `INSERT INTO ${tableIdentifier} ${finalSelectSql}`,
+    const compiledLimit0Result = await client.query({
+      query: `SELECT * FROM (${finalSelectSql}) LIMIT 0`,
+      format: 'JSON',
+      clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 60, readonly: 1 }),
+    })
+    const compiledLimit0Json = await compiledLimit0Result.json<{ meta?: Array<{ name: string; type: string }> }>()
+    const compiledLimit0Schema: ColumnMetadata[] = (compiledLimit0Json.meta ?? []).map((col) => ({
+      name: col.name,
+      type: col.type,
+    }))
+
+    const finalTempTableName = `__tmp_final_${jobId}`
+    const finalTempIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(finalTempTableName)}`
+    const columnSql = finalSchema.map((column) => `${quoteIdentifier(column.name)} ${column.type}`).join(', ')
+    const orderByClause = orderBy.length ? quoteIdentifier(orderBy[0]!) : 'tuple()'
+
+    await registerTempRunning(finalTempTableName)
+    await createMergeTreeTableSafe(
+      client,
+      `CREATE TABLE ${finalTempIdentifier} (${columnSql}) ENGINE ${engine} ORDER BY ${orderByClause}`,
+      900,
+    )
+
+    const insertResponse = await client.command({
+      query: `INSERT INTO ${finalTempIdentifier} ${finalSelectSql}`,
       clickhouse_settings: buildClickHouseQuerySettings({ max_execution_time: 900 }),
     })
+    const rawWrittenRows = insertResponse && typeof insertResponse === 'object' && 'summary' in insertResponse
+      ? insertResponse.summary?.written_rows
+      : undefined
+    const writtenRows = rawWrittenRows !== undefined && /^\d+$/.test(String(rawWrittenRows))
+      ? countValue(rawWrittenRows, 'jumlah baris tertulis INSERT')
+      : null
 
-    const countResult = await client.query({
-      query: `SELECT count() AS total FROM ${tableIdentifier}`,
+    const tempCountResult = await client.query({
+      query: `SELECT count() AS total FROM ${finalTempIdentifier}`,
       format: 'JSONEachRow',
       clickhouse_settings: { readonly: 1, max_execution_time: 30 },
     })
-    const [resultCountRow] = await countResult.json<{ total: number | string }[]>()
-    resultRows = countValue(resultCountRow?.total, 'jumlah baris hasil')
-    if (resultRows !== expectedResultRows) {
-      badRequest(
-        500,
-        'Verifikasi jumlah baris gagal',
-        `Jumlah baris tabel hasil (${resultRows}) berbeda dari hitungan pipeline (${expectedResultRows}).`,
-      )
-    }
+    const [tempCountRow] = await tempCountResult.json<{ total: number | string }[]>()
+    const tempRowCount = countValue(tempCountRow?.total, 'jumlah baris tabel sementara')
+
+    const actualColumnsResult = await client.query({
+      query: 'SELECT name, type FROM system.columns WHERE database = {database:String} AND table = {table:String} ORDER BY position',
+      query_params: { database: sourceDatabase, table: finalTempTableName },
+      format: 'JSONEachRow',
+      clickhouse_settings: { readonly: 1, max_execution_time: 15 },
+    })
+    const actualColumns = await actualColumnsResult.json<ColumnMetadata[]>()
 
     const requiredOriginalColumns = saveOriginal
       ? includedOriginalColumns.map((column) => `${column}_asli`)
       : []
-    let verification = `Jumlah baris hasil (${resultRows}) sesuai hitungan pipeline (${expectedResultRows}).`
-    if (requiredOriginalColumns.length) {
-      const originalColumnResult = await client.query({
-        query: 'SELECT name, type FROM system.columns WHERE database = {database:String} AND table = {table:String}',
-        query_params: { database: sourceDatabase, table: resultTableName },
-        format: 'JSONEachRow',
-        clickhouse_settings: { readonly: 1, max_execution_time: 15 },
-      })
-      const actualColumns = await originalColumnResult.json<{ name: string; type: string }[]>()
-      const expectedOriginalColumns = finalSchema.filter(({ name }) => requiredOriginalColumns.includes(name))
-      const invalid = expectedOriginalColumns.some((expected) =>
-        !actualColumns.some((actual) => actual.name === expected.name && actual.type === expected.type),
-      )
-      if (invalid) {
-        badRequest(500, 'Verifikasi nilai asli gagal', 'Kolom nilai asli tidak ditemukan dengan tipe yang sesuai pada tabel hasil.')
-      }
-      verification = `${requiredOriginalColumns.length} kolom nilai asli ditemukan dan jumlah baris hasil (${resultRows}) sesuai hitungan pipeline (${expectedResultRows}).`
+    const expectedOriginalColumns = finalSchema.filter(({ name }) => requiredOriginalColumns.includes(name))
+
+    verificationReport = verifyFinalTableIntegrity({
+      expectedResultRows,
+      writtenRows,
+      actualResultRows: tempRowCount,
+      compiledSchema: compiledLimit0Schema.length > 0 ? compiledLimit0Schema : finalSchema,
+      actualColumns,
+      expectedOriginalColumns,
+    })
+
+    const existingBeforeRename = await client.query({
+      query: 'SELECT name FROM system.tables WHERE database = {database:String} AND name = {table:String} LIMIT 1',
+      query_params: { database: sourceDatabase, table: resultTableName },
+      format: 'JSONEachRow',
+      clickhouse_settings: { readonly: 1, max_execution_time: 15 },
+    })
+    const foundBeforeRename = await existingBeforeRename.json<{ name: string }[]>()
+    if (foundBeforeRename.length > 0) {
+      badRequest(409, 'Tabel hasil sudah ada', 'Nama tabel hasil sudah digunakan. Pilih nama lain agar tabel yang sudah ada tidak diubah.')
     }
 
+    const resultTableIdentifier = `${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(resultTableName)}`
+    await client.command({
+      query: `RENAME TABLE ${finalTempIdentifier} TO ${resultTableIdentifier}`,
+      clickhouse_settings: { max_execution_time: 60 },
+    })
+
+    const renamedMeta = activeTempTables.get(finalTempTableName)
+    activeTempTables.delete(finalTempTableName)
+    if (renamedMeta) {
+      await recordTempTableStatus(client, {
+        jobId,
+        jenis: 'save',
+        database: sourceDatabase,
+        table: finalTempTableName,
+        status: 'done',
+        createdAtMs: renamedMeta.createdAtMs,
+      }).catch((err) => {
+        console.warn(`Gagal mencatat status done untuk tabel sementara ${sourceDatabase}.${finalTempTableName}:`, err)
+      })
+    }
+
+    resultRows = tempRowCount
+    historyParameters.verifikasi = verificationReport
     success = true
+
     return {
       status: 'ok',
       database: sourceDatabase,
@@ -365,29 +555,22 @@ export async function executeStagedSaveTable(
       originalColumns: requiredOriginalColumns,
       steps: totalSteps,
       durationMs: Date.now() - startedAt,
-      verification,
+      verification: verificationReport.ringkasan,
     }
   } catch (error) {
-    let failureMessage = messageFromSaveError(error)
-    if (resultTableCreated) {
-      try {
-        const partialCount = await client.query({
-          query: `SELECT count() AS total FROM ${quoteIdentifier(sourceDatabase)}.${quoteIdentifier(resultTableName)}`,
-          format: 'JSONEachRow',
-          clickhouse_settings: { readonly: 1, max_execution_time: 30 },
-        })
-        const [partialCountRow] = await partialCount.json<{ total: number | string }[]>()
-        resultRows = countValue(partialCountRow?.total, 'jumlah baris parsial')
-      } catch (countError) {
-        console.warn('Jumlah baris hasil yang gagal tidak dapat diverifikasi.', countError)
-        failureMessage = `${failureMessage} Jumlah baris parsial tidak dapat diverifikasi.`
-      }
+    const failureMessage = messageFromSaveError(error)
+    historyParameters.verifikasi = {
+      status: 'gagal',
+      ringkasan: failureMessage,
     }
     historyMessage = failureMessage
     throw error
   } finally {
-    for (const stageTable of [...createdStagingTables]) {
-      await dropStagingTable(stageTable)
+    await stopHeartbeat()
+
+    const finalTempStatus: 'done' | 'failed' = success ? 'done' : 'failed'
+    for (const tempTable of [...activeTempTables.keys()]) {
+      await finalizeAndDropTempTable(tempTable, finalTempStatus)
     }
 
     await recordCleansingHistory(client, {
@@ -397,7 +580,7 @@ export async function executeStagedSaveTable(
       resultTable: resultTableName,
       parameters: historyParameters,
       sourceRows,
-      filledRows: resultRows,
+      filledRows: success ? resultRows : 0,
       ambiguousRows: 0,
       durationMs: Date.now() - startedAt,
       status: success ? 'sukses' : 'gagal',

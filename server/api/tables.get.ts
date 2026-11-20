@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const result = await useClickHouse().query({
-      query: "SELECT name, engine FROM system.tables WHERE database = {db:String} AND NOT startsWith(name, '__tmp_ingest_') ORDER BY name",
+      query: "SELECT name, engine FROM system.tables WHERE database = {db:String} AND NOT startsWith(name, '__tmp_') ORDER BY name",
       query_params: { db: database },
       format: 'JSONEachRow',
     })

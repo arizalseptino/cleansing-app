@@ -193,8 +193,16 @@
         <div v-if="previewIsSampled && sourceReady" class="wb-sample-notice" role="status">
           <span class="wb-sample-badge">Sampel {{ numberFormat(previewSampleLimit) }} baris</span>
           <span class="wb-sample-text">
-            Mode pratinjau menggunakan sampel {{ numberFormat(previewSampleLimit) }} baris pertama agar respons cepat; 'Simpan sebagai tabel baru' akan memproses seluruh baris data.
+            Mode pratinjau hanya memproses sampel {{ numberFormat(previewSampleLimit) }} baris pertama agar respons cepat; 'Simpan sebagai tabel baru' akan memproses seluruh data.
           </span>
+          <ul v-if="previewHasDeduplicate || previewSequenceColumns.size > 0" class="wb-sample-subnotes">
+            <li v-if="previewHasDeduplicate">
+              <strong>Hapus duplikat (sampel):</strong> pada pratinjau, deduplikasi hanya dievaluasi pada sampel {{ numberFormat(previewSampleLimit) }} baris pertama.
+            </li>
+            <li v-if="previewSequenceColumns.size > 0">
+              <strong>Nomor urut (sampel):</strong> penomoran pada kolom <code>{{ [...previewSequenceColumns].join(', ') }}</code> hanya dihitung pada sampel {{ numberFormat(previewSampleLimit) }} baris pertama; nomor urut penuh dihitung ulang saat tabel disimpan.
+            </li>
+          </ul>
         </div>
         <div v-if="previewPending" class="wb-data-actions">
           <span class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
@@ -227,6 +235,13 @@
                         <span class="wb-column-name" :title="column.name">{{ column.name }}</span>
                       </button>
                       <small :title="column.type">{{ column.type }}</small>
+                      <span
+                        v-if="previewIsSampled && previewSequenceColumns.has(column.name)"
+                        class="wb-col-sample-tag"
+                        :title="`Nomor urut pada kolom ${column.name} di pratinjau hanya dihitung dari sampel ${numberFormat(previewSampleLimit)} baris pertama`"
+                      >
+                        Sampel nomor urut
+                      </span>
                       <div v-if="activeColumnMenu === column.name" class="wb-column-menu">
                         <strong>Operasi untuk {{ column.name }}</strong>
                         <button
@@ -263,7 +278,12 @@
             </table>
           </div>
           <nav class="wb-pagination" aria-label="Halaman data pratinjau">
-            <span>{{ numberFormat(totalRows) }} baris · Halaman {{ page }} dari {{ totalPages }}</span>
+            <span v-if="previewIsSampled">
+              Total baris pratinjau (sampel maks. {{ numberFormat(previewSampleLimit) }} baris): <strong>{{ numberFormat(totalRows) }}</strong> baris · Halaman {{ page }} dari {{ totalPages }}
+            </span>
+            <span v-else>
+              {{ numberFormat(totalRows) }} baris · Halaman {{ page }} dari {{ totalPages }}
+            </span>
             <div>
               <button class="wb-button wb-small" type="button" :disabled="page <= 1 || previewPending" @click="changePage(page - 1)">
                 Sebelumnya
@@ -277,10 +297,11 @@
 
         <section class="wb-rare-panel" aria-label="Cek Sisa Anomali / Typo (Frekuensi Rendah)">
           <div class="wb-rare-heading">
-            <div>
+            <div class="wb-rare-title-row">
               <h3>Cek Sisa Anomali / Typo (Frekuensi Rendah)</h3>
-              <p>Periksa sisa nilai teks berfrekuensi rendah yang berpotensi anomali atau typo setelah langkah ke-{{ selectedStep }}. Klik nilai untuk menyaring tampilan pratinjau.</p>
+              <span class="wb-full-data-badge">Dihitung dari seluruh data</span>
             </div>
+            <p>Periksa sisa nilai teks berfrekuensi rendah yang berpotensi anomali atau typo setelah langkah ke-{{ selectedStep }} (dihitung dari seluruh data, terpisah dari sampel pratinjau {{ numberFormat(previewSampleLimit) }} baris). Klik nilai untuk menyaring tampilan pratinjau.</p>
           </div>
 
           <p v-if="!sourceReady" class="wb-message">Pilih database dan tabel sumber untuk mengecek sisa anomali atau typo (frekuensi rendah).</p>
@@ -319,16 +340,20 @@
                 </label>
               </div>
               <button class="wb-button wb-small wb-primary" type="submit" :disabled="!rareColumn || rarePending">
-                {{ rarePending ? 'Menganalisis...' : 'Cek Anomali / Typo' }}
+                {{ rarePending ? 'Menganalisis seluruh data...' : 'Cek Anomali / Typo' }}
               </button>
             </form>
 
+            <p v-if="rarePending" class="wb-rare-loading" role="status">
+              Sedang menghitung nilai frekuensi rendah dari seluruh data... Proses ini memeriksa seluruh tabel tanpa sampel sehingga dapat memakan waktu lebih lama.
+            </p>
             <p v-if="rareError" class="wb-message wb-error" role="alert">{{ rareError }}</p>
             <template v-else-if="rareResult">
               <p class="wb-rare-summary" role="status">
                 <strong>{{ numberFormat(rareResult.summary.uniqueValues) }}</strong> nilai unik ·
                 <strong>{{ numberFormat(rareResult.summary.rareValues) }}</strong> nilai frekuensi rendah (&lt; {{ rareResult.threshold }}) ·
-                <strong>{{ numberFormat(rareResult.summary.affectedRows) }}</strong> baris terdampak
+                <strong>{{ numberFormat(rareResult.summary.affectedRows) }}</strong> baris terdampak ·
+                <span>dihitung dari seluruh data</span>
               </p>
 
               <div v-if="selectedRareItems.length > 0" class="wb-rare-bulk">
@@ -732,10 +757,13 @@ type RareValueItem = {
   nilaiAsli: string | null
 }
 type RareValuesResponse = {
+  aborted?: boolean
   column: string
   upTo: number
   threshold: number
   limit: number
+  computedFromFullData?: boolean
+  maxExecutionTimeSec?: number
   items: RareValueItem[]
   summary: {
     uniqueValues: number
@@ -835,8 +863,10 @@ const showMappingDialog = ref(false)
 const columnMappingDraft = reactive<Record<string, string>>({})
 
 let schemaController: AbortController | null = null
+let rareController: AbortController | null = null
 let previewRequest = 0
 let schemaRequest = 0
+let rareRequest = 0
 let masterColumnsRequest = 0
 let savePollTimer: ReturnType<typeof setTimeout> | null = null
 let activeSavePollRun = 0
@@ -892,6 +922,13 @@ const applyProgressPercent = computed(() => {
   return Math.min(100, Math.max(5, Math.round((progress.currentStep / progress.totalSteps) * 100)))
 })
 
+const previewActiveSteps = computed(() => pipeline.value.steps.slice(0, selectedStep.value))
+const previewHasDeduplicate = computed(() => previewActiveSteps.value.some((step) => step.op === 'deduplicate'))
+const previewSequenceColumns = computed(() => new Set(
+  previewActiveSteps.value
+    .filter((step) => step.op === 'add_column' && step.params?.kind === 'sequence' && typeof step.params.name === 'string' && step.params.name.trim())
+    .map((step) => String(step.params.name).trim()),
+))
 const rareTextColumns = computed(() => visibleColumns.value.filter(isTextColumn))
 const selectedRareItems = computed(() => {
   if (!rareResult.value) return []
@@ -1132,13 +1169,23 @@ async function loadOperations(): Promise<void> {
   }
 }
 
+function abortRareValues(): void {
+  if (rareController) {
+    rareController.abort()
+    rareController = null
+  }
+  rarePending.value = false
+}
+
 function changeDatabase(event: Event): void {
   const database = (event.target as HTMLSelectElement).value
+  abortRareValues()
   workbench.setSource(database, '')
   tables.value = []
   sourceColumns.value = []
   displayFilter.value = null
   rareResult.value = null
+  rareError.value = ''
   selectedRareKeys.value = []
   importSummary.value = null
   if (database) void loadTables(database)
@@ -1146,9 +1193,11 @@ function changeDatabase(event: Event): void {
 
 function changeTable(event: Event): void {
   const table = (event.target as HTMLSelectElement).value
+  abortRareValues()
   workbench.setSource(pipeline.value.source.database, table)
   displayFilter.value = null
   rareResult.value = null
+  rareError.value = ''
   selectedRareKeys.value = []
   importSummary.value = null
   void loadSourceColumns(pipeline.value.source.database, table)
@@ -1641,11 +1690,15 @@ function clearDisplayFilter(): void {
 
 async function loadRareValues(): Promise<void> {
   if (!sourceReady.value || !rareColumn.value) return
+  const request = ++rareRequest
+  abortRareValues()
+  const controller = new AbortController()
+  rareController = controller
   rarePending.value = true
   rareError.value = ''
   selectedRareKeys.value = []
   try {
-    rareResult.value = await $fetch<RareValuesResponse>('/api/workbench/rare-values', {
+    const response = await $fetch<RareValuesResponse>('/api/workbench/rare-values', {
       method: 'POST',
       body: {
         source: pipeline.value.source,
@@ -1658,12 +1711,17 @@ async function loadRareValues(): Promise<void> {
         excludeNull: rareExcludeNull.value,
         excludeEmpty: rareExcludeEmpty.value,
       },
+      signal: controller.signal,
     })
+    if (request !== rareRequest || controller.signal.aborted || response.aborted) return
+    rareResult.value = response
   } catch (error) {
+    if (request !== rareRequest || controller.signal.aborted || isAbortLikeError(error)) return
     rareResult.value = null
-    rareError.value = getErrorMessage(error, 'Nilai frekuensi rendah tidak dapat dianalisis.')
+    rareError.value = getErrorMessage(error, 'Nilai frekuensi rendah dari seluruh data tidak dapat dianalisis.')
   } finally {
-    rarePending.value = false
+    if (rareController === controller) rareController = null
+    if (request === rareRequest) rarePending.value = false
   }
 }
 
@@ -1949,7 +2007,9 @@ watch(
   () => `${pipeline.value.source.database}\u0000${pipeline.value.source.table}\u0000${JSON.stringify(pipeline.value.steps)}`,
   () => {
     page.value = 1
+    abortRareValues()
     rareResult.value = null
+    rareError.value = ''
     selectedRareKeys.value = []
     workbench.savePipeline()
     void refreshStepSchemas()
@@ -1965,7 +2025,9 @@ watch([selectedStep, page, limit], () => {
 })
 
 watch(selectedStep, () => {
+  abortRareValues()
   rareResult.value = null
+  rareError.value = ''
   selectedRareKeys.value = []
 })
 
@@ -1994,6 +2056,7 @@ onMounted(async () => {
 onUnmounted(() => {
   clearSavePollTimer()
   workbench.abortPreview()
+  abortRareValues()
   schemaController?.abort()
   schemaController = null
 })
@@ -2900,6 +2963,29 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 
+.wb-sample-subnotes {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: #354e66;
+  font-size: 11px;
+}
+
+.wb-col-sample-tag {
+  display: inline-block;
+  width: fit-content;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border: 1px solid #c7dcef;
+  border-radius: 4px;
+  color: #24507a;
+  background: #eaf3fc;
+  font-size: 10px;
+  font-weight: 650;
+}
+
 .wb-rare-panel {
   display: grid;
   gap: 10px;
@@ -2908,10 +2994,41 @@ onUnmounted(() => {
   border-top: 1px solid var(--warna-garis);
 }
 
+.wb-rare-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .wb-rare-heading h3 {
   margin: 0;
   color: #263a4e;
   font-size: 15px;
+}
+
+.wb-full-data-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid #b8d8bd;
+  border-radius: 4px;
+  color: #255a30;
+  background: #eaf5ec;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wb-rare-loading {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid #c7dcef;
+  border-radius: 8px;
+  color: #24507a;
+  background: #f4f9fe;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .wb-rare-heading p {

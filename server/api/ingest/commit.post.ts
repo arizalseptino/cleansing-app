@@ -22,6 +22,11 @@ import {
   validateTargetColumns,
 } from '../../features/ingest-csv'
 import { createMergeTreeTableSafe, quoteIdentifier } from '../../features/metadata'
+import {
+  dropRegisteredTempTable,
+  recordTempTableStatus,
+  startTempTableHeartbeat,
+} from '../../features/temp-table-registry'
 import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 function buildSafeTypedSelectExpr(colSql: string, colType: SupportedColumnType): string {
@@ -95,9 +100,8 @@ export default defineEventHandler(async (event) => {
   let targetColumnTypes: SupportedColumnType[] = []
   let expectedRowCount = 0
   let verifiedRowCount = 0
-  let createdStagingTable = false
-  let createdFinalStagingTable = false
-  let renamedToFinalTable = false
+  const ingestJobId = randomUUID().replace(/-/g, '').slice(0, 12)
+  const activeTempTables = new Map<string, { createdAtMs: number }>()
   let quotedDb = ''
   let quotedTable = ''
   let quotedStagingTable = ''
@@ -107,6 +111,77 @@ export default defineEventHandler(async (event) => {
 
   let status: 'sukses' | 'gagal' = 'gagal'
   let failureMessage: string | null = null
+
+  const stopHeartbeat = startTempTableHeartbeat(
+    client,
+    () => (targetDatabase
+      ? [...activeTempTables.entries()].map(([table, meta]) => ({
+          jobId: ingestJobId,
+          jenis: 'ingest' as const,
+          database: targetDatabase,
+          table,
+          createdAtMs: meta.createdAtMs,
+        }))
+      : []),
+    15_000,
+  )
+
+  const registerTempRunning = async (tempTableName: string) => {
+    const createdAtMs = await recordTempTableStatus(client, {
+      jobId: ingestJobId,
+      jenis: 'ingest',
+      database: targetDatabase,
+      table: tempTableName,
+      status: 'running',
+    })
+    activeTempTables.set(tempTableName, { createdAtMs })
+  }
+
+  const finalizeAndDropTempTable = async (tempTableName: string, finalStatus: 'done' | 'failed') => {
+    const meta = activeTempTables.get(tempTableName)
+    if (!meta || !targetDatabase) return
+    try {
+      await recordTempTableStatus(client, {
+        jobId: ingestJobId,
+        jenis: 'ingest',
+        database: targetDatabase,
+        table: tempTableName,
+        status: finalStatus,
+        createdAtMs: meta.createdAtMs,
+      })
+    } catch (statusErr) {
+      console.warn(`Gagal mencatat status ${finalStatus} tabel sementara ingest ${targetDatabase}.${tempTableName}:`, statusErr)
+    }
+    try {
+      await dropRegisteredTempTable(client, {
+        jobId: ingestJobId,
+        database: targetDatabase,
+        table: tempTableName,
+        maxExecutionTimeSec: 60,
+      })
+      activeTempTables.delete(tempTableName)
+    } catch (dropErr) {
+      console.warn(`Gagal menghapus tabel sementara ingest ${targetDatabase}.${tempTableName}:`, dropErr)
+    }
+  }
+
+  const markTempRenamedDone = async (tempTableName: string) => {
+    const meta = activeTempTables.get(tempTableName)
+    activeTempTables.delete(tempTableName)
+    if (!meta || !targetDatabase) return
+    try {
+      await recordTempTableStatus(client, {
+        jobId: ingestJobId,
+        jenis: 'ingest',
+        database: targetDatabase,
+        table: tempTableName,
+        status: 'done',
+        createdAtMs: meta.createdAtMs,
+      })
+    } catch (statusErr) {
+      console.warn(`Gagal mencatat status done tabel sementara ingest ${targetDatabase}.${tempTableName}:`, statusErr)
+    }
+  }
 
   try {
     currentStage = 'membaca_permintaan'
@@ -144,8 +219,8 @@ export default defineEventHandler(async (event) => {
       inspection.columnCount,
     )
 
-    const stagingTableName = `__tmp_ingest_${randomUUID().replace(/-/g, '').slice(0, 12)}`
-    const finalStagingTableName = `__tmp_ingest_typed_${randomUUID().replace(/-/g, '').slice(0, 12)}`
+    const stagingTableName = `__tmp_ingest_${ingestJobId}`
+    const finalStagingTableName = `__tmp_ingest_typed_${ingestJobId}`
     quotedDb = quoteIdentifier(targetDatabase)
     quotedTable = quoteIdentifier(tableName)
     quotedStagingTable = quoteIdentifier(stagingTableName)
@@ -158,12 +233,12 @@ export default defineEventHandler(async (event) => {
       .join(', ')
 
     currentStage = 'buat_tabel_sementara'
+    await registerTempRunning(stagingTableName)
     await createMergeTreeTableSafe(
       client,
       `CREATE TABLE ${quotedDb}.${quotedStagingTable} (${columnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
       60,
     )
-    createdStagingTable = true
 
     const csvInsertSettings = {
       format_csv_delimiter: delimiter,
@@ -273,19 +348,19 @@ export default defineEventHandler(async (event) => {
         query: `RENAME TABLE ${quotedDb}.${quotedStagingTable} TO ${quotedDb}.${quotedTable}`,
         clickhouse_settings: { max_execution_time: 60 },
       })
-      renamedToFinalTable = true
+      await markTempRenamedDone(stagingTableName)
     } else {
       currentStage = 'konversi_skema_tabel'
       const typedColumnDefinitions = quotedColumns
         .map((colSql, idx) => `${colSql} ${targetColumnTypes[idx]}`)
         .join(', ')
 
+      await registerTempRunning(finalStagingTableName)
       await createMergeTreeTableSafe(
         client,
         `CREATE TABLE ${quotedDb}.${quotedFinalStagingTable} (${typedColumnDefinitions}) ENGINE = MergeTree ORDER BY tuple()`,
         120,
       )
-      createdFinalStagingTable = true
 
       const selectExprs = quotedColumns.map((colSql, idx) =>
         buildSafeTypedSelectExpr(colSql, targetColumnTypes[idx]!),
@@ -311,18 +386,14 @@ export default defineEventHandler(async (event) => {
         })
       }
 
-      await client.command({
-        query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedStagingTable}`,
-        clickhouse_settings: { max_execution_time: 60 },
-      })
-      createdStagingTable = false
+      await finalizeAndDropTempTable(stagingTableName, 'done')
 
       await ensureTableDoesNotExist(client, targetDatabase, tableName)
       await client.command({
         query: `RENAME TABLE ${quotedDb}.${quotedFinalStagingTable} TO ${quotedDb}.${quotedTable}`,
         clickhouse_settings: { max_execution_time: 60 },
       })
-      renamedToFinalTable = true
+      await markTempRenamedDone(finalStagingTableName)
     }
 
     verifiedRowCount = actualCount
@@ -376,28 +447,6 @@ export default defineEventHandler(async (event) => {
     if (isConnError) {
       const health = await checkClickHouseAlive(client, config.clickhouseUrl)
       livenessNote = health.note
-    }
-
-    if (createdStagingTable && !renamedToFinalTable && quotedDb && quotedStagingTable) {
-      try {
-        await client.command({
-          query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedStagingTable}`,
-          clickhouse_settings: { max_execution_time: 30 },
-        })
-      } catch (dropErr) {
-        console.warn('Gagal membersihkan tabel sementara setelah pemuatan batal.', dropErr)
-      }
-    }
-
-    if (createdFinalStagingTable && !renamedToFinalTable && quotedDb && quotedFinalStagingTable) {
-      try {
-        await client.command({
-          query: `DROP TABLE IF EXISTS ${quotedDb}.${quotedFinalStagingTable}`,
-          clickhouse_settings: { max_execution_time: 30 },
-        })
-      } catch (dropErr) {
-        console.warn('Gagal membersihkan tabel konversi sementara setelah pemuatan batal.', dropErr)
-      }
     }
 
     const baseMessage = sanitizeIngestErrorMessage(
@@ -456,6 +505,13 @@ export default defineEventHandler(async (event) => {
       message: safeMessage,
     })
   } finally {
+    await stopHeartbeat()
+
+    const finalTempStatus: 'done' | 'failed' = status === 'sukses' ? 'done' : 'failed'
+    for (const tempTableName of [...activeTempTables.keys()]) {
+      await finalizeAndDropTempTable(tempTableName, finalTempStatus)
+    }
+
     if (payload?.mode === 'file') {
       if (payload.ownsTempFile) {
         cleanupTempFile(payload.filePath)

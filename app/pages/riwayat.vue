@@ -107,6 +107,9 @@
                     </ol>
                     <p v-else-if="entry.fitur_id === 'workbench'">Ringkasan langkah tidak tersedia pada data riwayat.</p>
                     <pre v-else>{{ formatParameters(entry.parameter) }}</pre>
+                    <p v-if="entry.fitur_id === 'workbench' && workbenchVerificationSummary(entry)" class="history-detail-verification">
+                      Verifikasi integritas: {{ workbenchVerificationSummary(entry) }}
+                    </p>
                     <p v-if="entry.pesan" class="history-detail-message">
                       Pesan: {{ entry.pesan }}
                     </p>
@@ -276,6 +279,16 @@ function workbenchHistorySteps(value: string): WorkbenchHistoryStep[] {
     )
   } catch {
     return []
+  }
+}
+
+function workbenchVerificationSummary(entry: HistoryEntry): string {
+  if (entry.status !== 'sukses') return ''
+  try {
+    const parsed = JSON.parse(entry.parameter) as { verifikasi?: { ringkasan?: unknown } }
+    return typeof parsed?.verifikasi?.ringkasan === 'string' ? parsed.verifikasi.ringkasan : ''
+  } catch {
+    return ''
   }
 }
 
@@ -537,6 +550,13 @@ onMounted(() => {
   padding-left: 20px;
   color: #526479;
   font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.history-detail-verification {
+  margin: 8px 0 0;
+  color: #315d27;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 

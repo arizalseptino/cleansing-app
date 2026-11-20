@@ -17,7 +17,7 @@ export type ClickHouseLikeClient = {
     clickhouse_settings?: Record<string, unknown>
     abort_signal?: AbortSignal
     query_id?: string
-  }) => Promise<unknown>
+  }) => Promise<{ query_id?: string; summary?: { written_rows?: string; read_rows?: string } } | void>
   exec: (params: {
     query: string
     query_params?: Record<string, unknown>
