@@ -225,57 +225,6 @@
         <div v-if="previewPending" class="wb-data-actions">
           <span class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
         </div>
-        <form
-          v-if="sourceReady && visibleColumns.length > 0"
-          class="wb-quick-filter"
-          aria-label="Filter cepat pratinjau"
-          @submit.prevent="applyQuickDisplayFilter"
-        >
-          <label class="wb-quick-filter-field">
-            <span class="sr-only">Kolom penyaring</span>
-            <select v-model="quickFilterColumn" aria-label="Kolom penyaring pratinjau">
-              <option v-for="col in visibleColumns" :key="col.name" :value="col.name">
-                {{ col.name }}
-              </option>
-            </select>
-          </label>
-          <label class="wb-quick-filter-field">
-            <span class="sr-only">Jenis penyaring</span>
-            <select v-model="quickFilterKind" aria-label="Jenis penyaring pratinjau">
-              <option value="contains">Mengandung teks</option>
-              <option value="text">Teks persis</option>
-              <option value="null">Bernilai NULL</option>
-              <option value="empty">String kosong</option>
-            </select>
-          </label>
-          <label v-if="quickFilterKind === 'contains' || quickFilterKind === 'text'" class="wb-quick-filter-input">
-            <span class="sr-only">Kata atau nilai penyaring</span>
-            <input
-              v-model="quickFilterValue"
-              type="text"
-              maxlength="2000"
-              :placeholder="quickFilterKind === 'contains' ? 'Mengandung teks (tidak peka kapital)...' : 'Nilai teks persis...'"
-              aria-label="Nilai penyaring pratinjau"
-            />
-          </label>
-          <div class="wb-quick-filter-actions">
-            <button
-              class="wb-button wb-small wb-primary"
-              type="submit"
-              :disabled="!canApplyQuickFilter"
-            >
-              Saring
-            </button>
-            <button
-              v-if="displayFilter"
-              class="wb-button wb-small"
-              type="button"
-              @click="clearDisplayFilter"
-            >
-              Reset
-            </button>
-          </div>
-        </form>
         <div v-if="displayFilter" class="wb-filter-chip" role="status">
           <span>
             <strong>Penyaring tampilan</strong> (hanya memengaruhi tampilan pratinjau, tidak ikut pipeline atau tabel hasil):
@@ -925,9 +874,6 @@ const rareError = ref('')
 const rareResult = ref<RareValuesResponse | null>(null)
 const selectedRareKeys = ref<string[]>([])
 const displayFilter = ref<DisplayFilter | null>(null)
-const quickFilterColumn = ref('')
-const quickFilterKind = ref<'contains' | 'text' | 'null' | 'empty'>('contains')
-const quickFilterValue = ref('')
 
 const showExportDialog = ref(false)
 const exportTemplateName = ref('')
@@ -1805,37 +1751,6 @@ function toggleRareDisplayFilter(item: RareValueItem): void {
       value: item.nilaiAsli,
       label: item.nilai,
     }
-    quickFilterColumn.value = rareResult.value.column
-    quickFilterKind.value = item.jenis
-    quickFilterValue.value = item.jenis === 'text' ? (item.nilaiAsli ?? '') : ''
-  }
-  page.value = 1
-  void loadPreview()
-}
-
-const canApplyQuickFilter = computed(() => {
-  if (!quickFilterColumn.value) return false
-  if (quickFilterKind.value === 'contains') return quickFilterValue.value.length > 0
-  return true
-})
-
-function applyQuickDisplayFilter(): void {
-  if (!canApplyQuickFilter.value) return
-  const column = quickFilterColumn.value
-  const kind = quickFilterKind.value
-  if (kind === 'null') {
-    displayFilter.value = { column, kind, value: null, label: '(NULL)' }
-  } else if (kind === 'empty') {
-    displayFilter.value = { column, kind, value: '', label: '(kosong)' }
-  } else if (kind === 'contains') {
-    displayFilter.value = { column, kind, value: quickFilterValue.value, label: `"${quickFilterValue.value}"` }
-  } else {
-    displayFilter.value = {
-      column,
-      kind: 'text',
-      value: quickFilterValue.value,
-      label: quickFilterValue.value === '' ? '(kosong)' : quickFilterValue.value,
-    }
   }
   page.value = 1
   void loadPreview()
@@ -1843,7 +1758,6 @@ function applyQuickDisplayFilter(): void {
 
 function clearDisplayFilter(): void {
   displayFilter.value = null
-  quickFilterValue.value = ''
   page.value = 1
   void loadPreview()
 }
@@ -2161,14 +2075,11 @@ watch(rareTextColumns, (cols) => {
 }, { immediate: true })
 
 watch(visibleColumns, (cols) => {
-  if (!cols.some((c) => c.name === quickFilterColumn.value)) {
-    quickFilterColumn.value = cols[0]?.name ?? ''
-  }
   if (displayFilter.value && !cols.some((c) => c.name === displayFilter.value?.column)) {
     displayFilter.value = null
     void loadPreview()
   }
-}, { immediate: true })
+})
 
 watch(
   () => `${pipeline.value.source.database}\u0000${pipeline.value.source.table}\u0000${JSON.stringify(pipeline.value.steps)}`,
@@ -3425,48 +3336,6 @@ onUnmounted(() => {
   background: #fff;
   font: inherit;
   font-size: 13px;
-}
-
-.wb-quick-filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 9px;
-  background: #f8fbfe;
-}
-
-.wb-quick-filter-field,
-.wb-quick-filter-input {
-  min-width: 0;
-  flex: 1 1 140px;
-}
-
-.wb-quick-filter-input {
-  flex: 2 1 190px;
-}
-
-.wb-quick-filter select,
-.wb-quick-filter input {
-  width: 100%;
-  min-width: 0;
-  min-height: 34px;
-  padding: 5px 8px;
-  border: 1px solid var(--warna-garis);
-  border-radius: 7px;
-  color: var(--warna-teks);
-  background: #fff;
-  font: inherit;
-  font-size: 12px;
-}
-
-.wb-quick-filter-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 @media (max-width: 620px) {
