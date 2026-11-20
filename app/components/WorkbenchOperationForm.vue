@@ -53,7 +53,7 @@
         multiple
         :required="parameter.required"
       >
-        <option v-for="column in schema" :key="column.name" :value="column.name">
+        <option v-for="column in activeSchema" :key="column.name" :value="column.name">
           {{ column.name }} ({{ column.type }})
         </option>
       </select>
@@ -552,6 +552,8 @@ const optionLabels: Record<string, string> = {
   edit_distance: 'Jarak edit ternormalisasi',
   lowercase: 'Huruf kecil',
   remove_punctuation: 'Hapus tanda baca',
+  drop: 'Hapus kolom',
+  rename: 'Ubah nama kolom',
 }
 
 function optionLabel(value: string): string {
@@ -560,6 +562,11 @@ function optionLabel(value: string): string {
 
 function isParameterVisible(parameter: Parameter): boolean {
   if (parameter.key === 'newTargetName') return draft.createTarget === true
+  if (props.operation.id === 'manage_columns') {
+    if (parameter.key === 'columns') return draft.mode === 'drop'
+    if (parameter.key === 'sourceColumn' || parameter.key === 'newName') return draft.mode === 'rename'
+    return true
+  }
   if (props.operation.id === 'fuzzy_match_master') {
     if (parameter.key === 'algorithm' || parameter.key === 'threshold' || parameter.key === 'normalization') {
       return draft.mode === 'similarity'
@@ -627,10 +634,17 @@ watch(
     if (props.prefilledColumn) {
       const columnParam = props.operation.params.find((parameter) => parameter.type === 'column')
       if (columnParam) draft[columnParam.key] = props.prefilledColumn
+      if (props.operation.id === 'manage_columns') {
+        draft.columns = [props.prefilledColumn]
+      }
     }
     formError.value = ''
   },
   { immediate: true },
+)
+
+const activeSchema = computed(() =>
+  props.schema.filter((column) => !column.name.startsWith('__sumber_') && !column.name.startsWith('__sebelum_')),
 )
 
 function isTextColumn(column: Column): boolean {
@@ -649,7 +663,7 @@ function columnsFor(parameter: Parameter): Column[] {
     || props.operation.id === 'replace_values'
     || (props.operation.id === 'extract_and_route' && parameter.key === 'targetColumn')
     || ((props.operation.id === 'fill_from_master' || props.operation.id === 'fuzzy_match_master') && /Column$/.test(parameter.key))
-  return textOnly ? props.schema.filter(isTextColumn) : props.schema
+  return textOnly ? activeSchema.value.filter(isTextColumn) : activeSchema.value
 }
 
 function pairValues(key: string): Pair[] {
@@ -786,6 +800,55 @@ function submit(): void {
   formError.value = ''
   const params: Record<string, unknown> = {}
   if (props.operation.params.some((p) => p.allowNew)) params.createTarget = draft.createTarget === true
+  if (props.operation.id === 'manage_columns') {
+    const mode = String(draft.mode ?? '')
+    if (mode !== 'drop' && mode !== 'rename') {
+      formError.value = 'Tindakan kolom wajib dipilih.'
+      return
+    }
+    params.mode = mode
+    if (mode === 'drop') {
+      const selectedCols = Array.isArray(draft.columns)
+        ? draft.columns.filter((c): c is string => typeof c === 'string' && c.trim() !== '')
+        : []
+      if (selectedCols.length === 0) {
+        formError.value = 'Pilih minimal satu kolom untuk dihapus.'
+        return
+      }
+      if (activeSchema.value.length > 0 && selectedCols.length >= activeSchema.value.length) {
+        formError.value = 'Tidak dapat menghapus seluruh kolom hingga tersisa 0 kolom.'
+        return
+      }
+      params.columns = [...selectedCols]
+    } else {
+      const sourceColumn = String(draft.sourceColumn ?? '').trim()
+      const newName = String(draft.newName ?? '').trim()
+      if (!sourceColumn) {
+        formError.value = 'Kolom sumber wajib dipilih.'
+        return
+      }
+      if (!newName) {
+        formError.value = 'Nama kolom baru wajib diisi.'
+        return
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(newName)) {
+        formError.value = 'Nama kolom baru harus diawali huruf atau garis bawah, maksimal 64 karakter, dan hanya memuat huruf, angka, atau garis bawah.'
+        return
+      }
+      if (newName === sourceColumn) {
+        formError.value = 'Nama kolom baru harus berbeda dari nama kolom sumber.'
+        return
+      }
+      if (activeSchema.value.some((col) => col.name === newName)) {
+        formError.value = `Nama kolom tujuan "${newName}" sudah dipakai oleh kolom lain yang masih aktif.`
+        return
+      }
+      params.sourceColumn = sourceColumn
+      params.newName = newName
+    }
+    emit('submit', params)
+    return
+  }
   if (props.operation.id === 'fuzzy_match_master' && draft.routeUnmatched === true && !String(draft.unmatchedColumn ?? '').trim()) {
     formError.value = 'Kolom tujuan nilai tidak cocok wajib dipilih.'
     return

@@ -4,7 +4,7 @@ import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
 
 type DisplayFilter = {
   column: string
-  kind: 'null' | 'empty' | 'text'
+  kind: 'null' | 'empty' | 'text' | 'contains'
   value?: string | null
 }
 
@@ -67,7 +67,10 @@ export default defineEventHandler(async (event) => {
       }
       const filterColumn = typeof rawFilter.column === 'string' ? rawFilter.column : ''
       const filterKind = rawFilter.kind
-      if (!filterColumn || (filterKind !== 'null' && filterKind !== 'empty' && filterKind !== 'text')) {
+      if (
+        !filterColumn
+        || (filterKind !== 'null' && filterKind !== 'empty' && filterKind !== 'text' && filterKind !== 'contains')
+      ) {
         throw createError({ statusCode: 400, statusMessage: 'Penyaring tampilan tidak valid', message: 'Kolom dan jenis penyaring tampilan wajib diisi.' })
       }
       const verifiedColumn = compiled.schema.find((col) => col.name === filterColumn)
@@ -80,6 +83,16 @@ export default defineEventHandler(async (event) => {
         condition = `isNull(${quoted})`
       } else if (filterKind === 'empty') {
         condition = `(NOT isNull(${quoted}) AND toString(${quoted}) = '')`
+      } else if (filterKind === 'contains') {
+        if (typeof rawFilter.value !== 'string' || rawFilter.value.length === 0 || rawFilter.value.length > 2000) {
+          throw createError({
+            statusCode: 400,
+            statusMessage: 'Nilai penyaring tidak valid',
+            message: 'Nilai penyaring mengandung teks harus berupa teks 1 sampai 2.000 karakter.',
+          })
+        }
+        previewParams.wb_display_filter_val = rawFilter.value
+        condition = `(NOT isNull(${quoted}) AND positionCaseInsensitiveUTF8(toString(${quoted}), {wb_display_filter_val:String}) > 0)`
       } else {
         if (typeof rawFilter.value !== 'string' || rawFilter.value.length > 2000) {
           throw createError({ statusCode: 400, statusMessage: 'Nilai penyaring tidak valid', message: 'Nilai penyaring tampilan harus berupa teks maksimal 2.000 karakter.' })

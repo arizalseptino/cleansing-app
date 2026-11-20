@@ -23,7 +23,7 @@ type StoredPipeline = {
 
 export type WorkbenchPreviewDisplayFilter = {
   column: string
-  kind: 'null' | 'empty' | 'text'
+  kind: 'null' | 'empty' | 'text' | 'contains'
   value?: string | null
 }
 

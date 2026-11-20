@@ -5,6 +5,7 @@ import deduplicate from './deduplicate'
 import extractAndRoute from './extract_and_route'
 import fillFromMaster from './fill_from_master'
 import fuzzyMatchMaster from './fuzzy_match_master'
+import manageColumns from './manage_columns'
 import replaceValues from './replace_values'
 import trimText from './trim_text'
 
@@ -12,6 +13,7 @@ export const operations: Record<string, OperationDefinition> = {
   trim_text: trimText,
   replace_values: replaceValues,
   add_column: addColumn,
+  manage_columns: manageColumns,
   fill_from_master: fillFromMaster,
   fuzzy_match_master: fuzzyMatchMaster,
   deduplicate,

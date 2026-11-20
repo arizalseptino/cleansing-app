@@ -339,6 +339,21 @@ function historyOperationName(id: string): string {
 
 function historyTouchedColumns(op: string, params: Record<string, unknown>): string[] {
   if (op === 'add_column') return typeof params.name === 'string' && params.name ? [params.name] : []
+  if (op === 'manage_columns') {
+    if (params.mode === 'drop') {
+      const cols = Array.isArray(params.columns)
+        ? params.columns.filter((c): c is string => typeof c === 'string' && Boolean(c))
+        : []
+      return cols.length ? [`Hapus: ${cols.join(', ')}`] : []
+    }
+    if (params.mode === 'rename') {
+      const src = typeof params.sourceColumn === 'string' ? params.sourceColumn : ''
+      const dst = typeof params.newName === 'string' ? params.newName : ''
+      if (src && dst) return [`${src} -> ${dst}`]
+      return src ? [src] : []
+    }
+    return []
+  }
   if (op === 'fill_from_master') {
     return typeof params.targetColumn === 'string' && params.targetColumn ? [params.targetColumn] : []
   }

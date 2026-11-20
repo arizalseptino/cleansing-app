@@ -44,6 +44,13 @@ function getStepReadColumns(op: string, params: Record<string, unknown>, writeCo
     if (Array.isArray(params.columns)) {
       for (const col of params.columns) addStr(col)
     }
+  } else if (op === 'manage_columns') {
+    if (params.mode === 'rename') {
+      addStr(params.sourceColumn)
+      addStr(params.newName)
+    } else if (params.mode === 'drop' && Array.isArray(params.columns)) {
+      for (const col of params.columns) addStr(col)
+    }
   } else if (op === 'conditional_rule' && Array.isArray(params.rules)) {
     for (const rule of params.rules) {
       if (!rule || typeof rule !== 'object') continue
@@ -268,6 +275,7 @@ export async function compilePipeline(
       const writeColumns = [...new Set([...stepTouchedColumns, ...stepAddedColumns])]
       const requiresFullHistory = (step.op === 'add_column' && step.params?.kind === 'sequence')
         || step.op === 'fuzzy_match_master'
+        || (step.op === 'manage_columns' && step.params?.mode === 'rename')
       stepEntries.push({
         stepTemplateSql: stepSql,
         readColumns: getStepReadColumns(step.op, step.params ?? {}, writeColumns),

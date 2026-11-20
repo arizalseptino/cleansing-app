@@ -425,6 +425,14 @@ export default defineEventHandler(async (event) => {
           if (createdName && compiled.addedColumns.includes(createdName)) {
             extractCreatedColumns.add(createdName)
           }
+        } else if (step.op === 'manage_columns') {
+          if (step.params?.mode === 'drop' && Array.isArray(step.params.columns)) {
+            for (const col of step.params.columns) {
+              if (typeof col === 'string') extractCreatedColumns.delete(col.trim())
+            }
+          } else if (step.params?.mode === 'rename' && typeof step.params.sourceColumn === 'string') {
+            extractCreatedColumns.delete(step.params.sourceColumn.trim())
+          }
         }
         validCount += 1
         stepStatuses.push({
