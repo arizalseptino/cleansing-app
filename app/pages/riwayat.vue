@@ -110,6 +110,10 @@
                     <p v-if="entry.fitur_id === 'workbench' && workbenchVerificationSummary(entry)" class="history-detail-verification">
                       Verifikasi integritas: {{ workbenchVerificationSummary(entry) }}
                     </p>
+                    <QualitySummaryCard
+                      v-if="workbenchQualitySummary(entry)"
+                      :summary="workbenchQualitySummary(entry)!"
+                    />
                     <p v-if="entry.pesan" class="history-detail-message">
                       Pesan: {{ entry.pesan }}
                     </p>
@@ -163,6 +167,7 @@
 </template>
 
 <script setup lang="ts">
+import type { QualitySummaryColumnStat, QualitySummaryData } from '~/components/QualitySummaryCard.vue'
 type HistoryEntry = {
   id: string
   waktu_mulai: string
@@ -289,6 +294,42 @@ function workbenchVerificationSummary(entry: HistoryEntry): string {
     return typeof parsed?.verifikasi?.ringkasan === 'string' ? parsed.verifikasi.ringkasan : ''
   } catch {
     return ''
+  }
+}
+
+function workbenchQualitySummary(entry: HistoryEntry): QualitySummaryData | null {
+  if (entry.fitur_id !== 'workbench' || entry.status !== 'sukses') return null
+  try {
+    const parsed = JSON.parse(entry.parameter) as { ringkasan_kualitas?: unknown }
+    const raw = parsed?.ringkasan_kualitas
+    if (!raw || typeof raw !== 'object') return null
+    const obj = raw as Record<string, unknown>
+    if (obj.status !== 'ok' && obj.status !== 'dilewati') return null
+    if (typeof obj.barisSebelum !== 'number' || typeof obj.barisSesudah !== 'number' || typeof obj.selisihBaris !== 'number') {
+      return null
+    }
+    const kolom = Array.isArray(obj.kolom)
+      ? obj.kolom.filter((item): item is QualitySummaryColumnStat =>
+          Boolean(
+            item
+            && typeof item === 'object'
+            && typeof (item as Record<string, unknown>).kolom === 'string'
+            && typeof (item as Record<string, unknown>).kosongSebelum === 'number'
+            && typeof (item as Record<string, unknown>).kosongSesudah === 'number'
+            && typeof (item as Record<string, unknown>).selisih === 'number',
+          ),
+        )
+      : []
+    return {
+      status: obj.status,
+      barisSebelum: obj.barisSebelum,
+      barisSesudah: obj.barisSesudah,
+      selisihBaris: obj.selisihBaris,
+      kolom,
+      catatan: typeof obj.catatan === 'string' ? obj.catatan : null,
+    }
+  } catch {
+    return null
   }
 }
 

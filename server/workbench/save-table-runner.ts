@@ -9,7 +9,11 @@ import {
   startTempTableHeartbeat,
 } from '../features/temp-table-registry'
 import { buildClickHouseQuerySettings } from '../utils/clickhouse'
-import type { SaveTableResult } from './save-jobs'
+import type {
+  QualitySummaryColumnStat,
+  QualitySummaryReport,
+  SaveTableResult,
+} from './save-jobs'
 
 export type ParsedSaveTableRequest = {
   sourceDatabase: string
@@ -155,6 +159,176 @@ export function verifyFinalTableIntegrity(input: FinalIntegrityInput): FinalInte
     jumlahKolom: compiledSchema.length,
     kolomAsli: origNames,
     ringkasan,
+  }
+}
+
+export type ComparableColumnPair = {
+  name: string
+  sourceType: string
+  finalType: string
+}
+
+export function selectComparableColumns(
+  sourceSchema: ColumnMetadata[],
+  finalSchema: ColumnMetadata[],
+  addedOriginalColumns: string[] = [],
+): ComparableColumnPair[] {
+  const excluded = new Set(addedOriginalColumns)
+  const finalByName = new Map(finalSchema.map((col) => [col.name, col]))
+  const pairs: ComparableColumnPair[] = []
+
+  for (const sourceCol of sourceSchema) {
+    if (excluded.has(sourceCol.name)) continue
+    if (sourceCol.name.startsWith('__sumber_') || sourceCol.name.startsWith('__sebelum_')) continue
+    const finalCol = finalByName.get(sourceCol.name)
+    if (!finalCol) continue
+    pairs.push({
+      name: sourceCol.name,
+      sourceType: sourceCol.type,
+      finalType: finalCol.type,
+    })
+  }
+
+  return pairs
+}
+
+function unwrapClickHouseType(rawType: string): string {
+  let normalized = rawType.trim()
+  while (/^(Nullable|LowCardinality)\s*\((.*)\)$/.test(normalized)) {
+    normalized = normalized.replace(/^(Nullable|LowCardinality)\s*\((.*)\)$/, '$2').trim()
+  }
+  return normalized
+}
+
+export function buildEmptyCheckExpression(columnName: string, columnType: string): string {
+  const quoted = quoteIdentifier(columnName)
+  const base = unwrapClickHouseType(columnType)
+  if (/^(Array|Map|Tuple|Nested)\s*\(/i.test(base)) {
+    return `empty(${quoted})`
+  }
+  return `(isNull(${quoted}) OR trimBoth(ifNull(toString(${quoted}), '')) = '')`
+}
+
+export function buildQualitySummaryQuery(
+  sourceIdentifier: string,
+  resultTableIdentifier: string,
+  comparableColumns: ComparableColumnPair[],
+): string {
+  const outerSelects = [
+    's.baris_sebelum AS baris_sebelum',
+    'd.baris_sesudah AS baris_sesudah',
+  ]
+  const sourceSelects = ['count() AS baris_sebelum']
+  const finalSelects = ['count() AS baris_sesudah']
+
+  comparableColumns.forEach((col, index) => {
+    const srcAlias = `kosong_sebelum_${index}`
+    const dstAlias = `kosong_sesudah_${index}`
+    outerSelects.push(`s.${srcAlias} AS ${srcAlias}`, `d.${dstAlias} AS ${dstAlias}`)
+    sourceSelects.push(`countIf(${buildEmptyCheckExpression(col.name, col.sourceType)}) AS ${srcAlias}`)
+    finalSelects.push(`countIf(${buildEmptyCheckExpression(col.name, col.finalType)}) AS ${dstAlias}`)
+  })
+
+  return [
+    `SELECT ${outerSelects.join(', ')}`,
+    `FROM (SELECT ${sourceSelects.join(', ')} FROM ${sourceIdentifier}) AS s`,
+    `CROSS JOIN (SELECT ${finalSelects.join(', ')} FROM ${resultTableIdentifier}) AS d`,
+  ].join(' ')
+}
+
+function parseSummaryCount(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim())
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null
+  }
+  return null
+}
+
+export async function computeQualitySummarySafe(
+  client: ReturnType<typeof useClickHouse>,
+  input: {
+    sourceDatabase: string
+    sourceTable: string
+    resultTableName: string
+    sourceSchema: ColumnMetadata[]
+    finalSchema: ColumnMetadata[]
+    addedOriginalColumns: string[]
+    fallbackSourceRows: number
+    fallbackResultRows: number
+    maxExecutionTimeSec?: number
+  },
+): Promise<QualitySummaryReport> {
+  const skippedFallback = (catatan: string): QualitySummaryReport => ({
+    status: 'dilewati',
+    barisSebelum: input.fallbackSourceRows,
+    barisSesudah: input.fallbackResultRows,
+    selisihBaris: input.fallbackResultRows - input.fallbackSourceRows,
+    kolom: [],
+    catatan,
+  })
+
+  try {
+    const comparableColumns = selectComparableColumns(
+      input.sourceSchema,
+      input.finalSchema,
+      input.addedOriginalColumns,
+    )
+    const sourceIdentifier = `${quoteIdentifier(input.sourceDatabase)}.${quoteIdentifier(input.sourceTable)}`
+    const resultTableIdentifier = `${quoteIdentifier(input.sourceDatabase)}.${quoteIdentifier(input.resultTableName)}`
+    const query = buildQualitySummaryQuery(sourceIdentifier, resultTableIdentifier, comparableColumns)
+
+    const response = await client.query({
+      query,
+      format: 'JSONEachRow',
+      clickhouse_settings: buildClickHouseQuerySettings({
+        readonly: 1,
+        max_execution_time: input.maxExecutionTimeSec ?? 60,
+      }),
+    })
+    const [row] = await response.json<Record<string, unknown>[]>()
+    if (!row) {
+      return skippedFallback('Ringkasan kualitas dilewati karena ClickHouse tidak mengembalikan baris ringkasan.')
+    }
+
+    const barisSebelum = parseSummaryCount(row.baris_sebelum)
+    const barisSesudah = parseSummaryCount(row.baris_sesudah)
+    if (barisSebelum === null || barisSesudah === null) {
+      return skippedFallback('Ringkasan kualitas dilewati karena hitungan total baris tidak valid.')
+    }
+
+    const kolom: QualitySummaryColumnStat[] = []
+    for (let index = 0; index < comparableColumns.length; index += 1) {
+      const col = comparableColumns[index]!
+      const kosongSebelum = parseSummaryCount(row[`kosong_sebelum_${index}`])
+      const kosongSesudah = parseSummaryCount(row[`kosong_sesudah_${index}`])
+      if (kosongSebelum === null || kosongSesudah === null) {
+        return skippedFallback('Ringkasan kualitas dilewati karena hitungan nilai kosong kolom tidak valid.')
+      }
+      kolom.push({
+        kolom: col.name,
+        kosongSebelum,
+        kosongSesudah,
+        selisih: kosongSesudah - kosongSebelum,
+      })
+    }
+
+    return {
+      status: 'ok',
+      barisSebelum,
+      barisSesudah,
+      selisihBaris: barisSesudah - barisSebelum,
+      kolom,
+      catatan: null,
+    }
+  } catch (error) {
+    console.warn(
+      `Ringkasan kualitas data untuk ${input.sourceDatabase}.${input.resultTableName} dilewati:`,
+      error,
+    )
+    return skippedFallback('Ringkasan kualitas data (sebelum vs. sesudah) dilewati karena penghitungan gagal atau melewati batas waktu.')
   }
 }
 
@@ -541,8 +715,27 @@ export async function executeStagedSaveTable(
       })
     }
 
+    onProgress?.({
+      currentStep: totalSteps,
+      totalSteps,
+      message: 'Menghitung ringkasan kualitas data (sebelum vs. sesudah)...',
+    })
+
+    const qualitySummary = await computeQualitySummarySafe(client, {
+      sourceDatabase,
+      sourceTable,
+      resultTableName,
+      sourceSchema: preflight.sourceSchema,
+      finalSchema: actualColumns,
+      addedOriginalColumns: requiredOriginalColumns,
+      fallbackSourceRows: sourceRows,
+      fallbackResultRows: tempRowCount,
+      maxExecutionTimeSec: 60,
+    })
+
     resultRows = tempRowCount
     historyParameters.verifikasi = verificationReport
+    historyParameters.ringkasan_kualitas = qualitySummary
     success = true
 
     return {
@@ -556,6 +749,7 @@ export async function executeStagedSaveTable(
       steps: totalSteps,
       durationMs: Date.now() - startedAt,
       verification: verificationReport.ringkasan,
+      qualitySummary,
     }
   } catch (error) {
     const failureMessage = messageFromSaveError(error)

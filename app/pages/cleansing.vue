@@ -505,6 +505,7 @@
           <div><dt>Durasi</dt><dd>{{ applyResult.durationMs === undefined ? 'Tidak dikirim API' : `${numberFormat(applyResult.durationMs)} ms` }}</dd></div>
           <div><dt>Verifikasi</dt><dd>{{ applyResult.verification ?? 'Hasil verifikasi tidak dikirim API.' }}</dd></div>
         </dl>
+        <QualitySummaryCard v-if="applyResult.qualitySummary" :summary="applyResult.qualitySummary" />
         <div class="wb-dialog-actions">
           <button class="wb-button wb-primary" type="button" @click="viewResultTable">Lihat isi tabel hasil</button>
           <button class="wb-button" type="button" @click="openResultExportDialog">Ekspor tabel hasil</button>
@@ -713,6 +714,7 @@
 </template>
 
 <script setup lang="ts">
+import type { QualitySummaryData } from '~/components/QualitySummaryCard.vue'
 import type { WorkbenchPreviewResponse, WorkbenchStep } from '~/composables/useWorkbench'
 
 type Database = { name: string }
@@ -733,6 +735,7 @@ type ApplyResponse = {
   steps: number
   durationMs?: number
   verification?: string
+  qualitySummary?: QualitySummaryData
 }
 type SaveTableStartResponse = {
   jobId: string

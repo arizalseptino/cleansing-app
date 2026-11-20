@@ -1,5 +1,21 @@
 import { randomUUID } from 'node:crypto'
 
+export type QualitySummaryColumnStat = {
+  kolom: string
+  kosongSebelum: number
+  kosongSesudah: number
+  selisih: number
+}
+
+export type QualitySummaryReport = {
+  status: 'ok' | 'dilewati'
+  barisSebelum: number
+  barisSesudah: number
+  selisihBaris: number
+  kolom: QualitySummaryColumnStat[]
+  catatan: string | null
+}
+
 export type SaveTableResult = {
   status: 'ok'
   database: string
@@ -11,6 +27,7 @@ export type SaveTableResult = {
   steps: number
   durationMs: number
   verification: string
+  qualitySummary?: QualitySummaryReport
 }
 
 export type SaveTableJobStatus = {
