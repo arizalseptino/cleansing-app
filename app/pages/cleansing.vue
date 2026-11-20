@@ -179,7 +179,39 @@
         <div class="wb-card-heading wb-data-heading">
           <div class="wb-data-title">
             <p class="page-kicker">Pratinjau</p>
-            <h2 class="card-title">{{ selectedStep === 0 ? 'Data sumber' : `Hasil langkah ${selectedStep}` }}</h2>
+            <div class="wb-data-title-row">
+              <h2 class="card-title">{{ selectedStep === 0 ? 'Data sumber' : `Hasil langkah ${selectedStep}` }}</h2>
+              <div v-if="previewIsSampled && sourceReady" ref="sampleInfoRef" class="wb-sample-inline">
+                <span class="wb-sample-badge">Sampel {{ numberFormat(previewSampleLimit) }} baris</span>
+                <div
+                  class="wb-sample-info-wrap"
+                  @mouseenter="sampleTooltipHover = true"
+                  @mouseleave="sampleTooltipHover = false"
+                >
+                  <button
+                    type="button"
+                    class="wb-sample-info-btn"
+                    aria-label="Informasi sampel pratinjau"
+                    :aria-expanded="sampleTooltipVisible"
+                    aria-controls="wb-sample-popover"
+                    @click.stop="toggleSampleTooltip"
+                    @keydown.escape="closeSampleTooltip"
+                  >
+                    ⓘ
+                  </button>
+                </div>
+                <div
+                  v-if="sampleTooltipVisible"
+                  id="wb-sample-popover"
+                  class="wb-sample-popover"
+                  role="tooltip"
+                  @mouseenter="sampleTooltipHover = true"
+                  @mouseleave="sampleTooltipHover = false"
+                >
+                  Pratinjau memakai {{ numberFormat(previewSampleLimit) }} baris pertama agar respons cepat (termasuk untuk deduplikasi &amp; nomor urut). Simpan tabel tetap memproses seluruh data.
+                </div>
+              </div>
+            </div>
           </div>
           <label class="wb-limit-field" for="workbench-limit">
             Baris per halaman
@@ -189,20 +221,6 @@
               <option :value="100">100</option>
             </select>
           </label>
-        </div>
-        <div v-if="previewIsSampled && sourceReady" class="wb-sample-notice" role="status">
-          <span class="wb-sample-badge">Sampel {{ numberFormat(previewSampleLimit) }} baris</span>
-          <span class="wb-sample-text">
-            Mode pratinjau hanya memproses sampel {{ numberFormat(previewSampleLimit) }} baris pertama agar respons cepat; 'Simpan sebagai tabel baru' akan memproses seluruh data.
-          </span>
-          <ul v-if="previewHasDeduplicate || previewSequenceColumns.size > 0" class="wb-sample-subnotes">
-            <li v-if="previewHasDeduplicate">
-              <strong>Hapus duplikat (sampel):</strong> pada pratinjau, deduplikasi hanya dievaluasi pada sampel {{ numberFormat(previewSampleLimit) }} baris pertama.
-            </li>
-            <li v-if="previewSequenceColumns.size > 0">
-              <strong>Nomor urut (sampel):</strong> penomoran pada kolom <code>{{ [...previewSequenceColumns].join(', ') }}</code> hanya dihitung pada sampel {{ numberFormat(previewSampleLimit) }} baris pertama; nomor urut penuh dihitung ulang saat tabel disimpan.
-            </li>
-          </ul>
         </div>
         <div v-if="previewPending" class="wb-data-actions">
           <span class="wb-inline-status" role="status">Sedang menghitung pratinjau...</span>
@@ -864,6 +882,9 @@ const importError = ref('')
 const importSummary = ref<{ name: string; valid: number; invalid: number; suggestedSourceNote: string } | null>(null)
 const showMappingDialog = ref(false)
 const columnMappingDraft = reactive<Record<string, string>>({})
+const sampleInfoRef = ref<HTMLElement | null>(null)
+const sampleTooltipPinned = ref(false)
+const sampleTooltipHover = ref(false)
 
 let schemaController: AbortController | null = null
 let rareController: AbortController | null = null
@@ -925,13 +946,30 @@ const applyProgressPercent = computed(() => {
   return Math.min(100, Math.max(5, Math.round((progress.currentStep / progress.totalSteps) * 100)))
 })
 
+const sampleTooltipVisible = computed(() => Boolean(previewIsSampled.value && sourceReady.value && (sampleTooltipPinned.value || sampleTooltipHover.value)))
 const previewActiveSteps = computed(() => pipeline.value.steps.slice(0, selectedStep.value))
-const previewHasDeduplicate = computed(() => previewActiveSteps.value.some((step) => step.op === 'deduplicate'))
 const previewSequenceColumns = computed(() => new Set(
   previewActiveSteps.value
     .filter((step) => step.op === 'add_column' && step.params?.kind === 'sequence' && typeof step.params.name === 'string' && step.params.name.trim())
     .map((step) => String(step.params.name).trim()),
 ))
+
+function toggleSampleTooltip(): void {
+  sampleTooltipPinned.value = !sampleTooltipPinned.value
+}
+
+function closeSampleTooltip(): void {
+  sampleTooltipPinned.value = false
+  sampleTooltipHover.value = false
+}
+
+function handleDocumentPointerDown(event: PointerEvent): void {
+  if (!sampleTooltipPinned.value) return
+  const target = event.target as Node | null
+  if (sampleInfoRef.value && target && !sampleInfoRef.value.contains(target)) {
+    sampleTooltipPinned.value = false
+  }
+}
 const rareTextColumns = computed(() => visibleColumns.value.filter(isTextColumn))
 const selectedRareItems = computed(() => {
   if (!rareResult.value) return []
@@ -2043,6 +2081,7 @@ watch(
 )
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleDocumentPointerDown)
   workbench.initialize()
   resultEngine.value = pipeline.value.saveOptions.engine
   orderBy.value = [...pipeline.value.saveOptions.orderBy]
@@ -2057,6 +2096,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
   clearSavePollTimer()
   workbench.abortPreview()
   abortRareValues()
@@ -2933,19 +2973,18 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 
-.wb-sample-notice {
+.wb-data-title-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px 11px;
-  border: 1px solid #c7dcef;
-  border-radius: 9px;
-  color: #2c4358;
-  background: #f4f9fe;
-  font-size: 12px;
-  line-height: 1.45;
+}
+
+.wb-sample-inline {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .wb-sample-badge {
@@ -2961,19 +3000,47 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.wb-sample-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.wb-sample-info-wrap {
+  display: inline-flex;
+  align-items: center;
 }
 
-.wb-sample-subnotes {
-  flex: 1 0 100%;
-  display: grid;
-  gap: 4px;
-  margin: 4px 0 0;
-  padding-left: 18px;
-  color: #354e66;
-  font-size: 11px;
+.wb-sample-info-btn {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #b4d1ec;
+  border-radius: 999px;
+  color: #24507a;
+  background: #f4f9fe;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wb-sample-info-btn:hover,
+.wb-sample-info-btn:focus-visible {
+  border-color: var(--warna-utama);
+  background: #e3f0fb;
+}
+
+.wb-sample-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 6;
+  width: min(320px, calc(100vw - 64px));
+  padding: 9px 11px;
+  border: 1px solid #c7dcef;
+  border-radius: 9px;
+  color: #2c4358;
+  background: #fff;
+  box-shadow: var(--bayangan-kartu);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .wb-col-sample-tag {
