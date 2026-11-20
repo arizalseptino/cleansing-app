@@ -977,6 +977,15 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as { name?: unknown; code?: unknown; statusCode?: unknown; status?: unknown; message?: unknown; cause?: unknown }
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || err.statusCode === 499 || err.status === 499) return true
+  if (typeof err.message === 'string' && /\b(AbortError|aborted)\b/i.test(err.message)) return true
+  if (err.cause && err.cause !== error) return isAbortLikeError(err.cause)
+  return false
+}
+
 function numberFormat(value: number): string {
   return new Intl.NumberFormat('id-ID').format(Number(value) || 0)
 }
@@ -1310,7 +1319,7 @@ async function refreshStepSchemas(): Promise<void> {
         warnings: stepWarnings.map((warning) => `Langkah ${index + 1}: ${warning}`),
       })
     } catch (error) {
-      if (request !== schemaRequest || controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return
+      if (request !== schemaRequest || controller.signal.aborted || isAbortLikeError(error)) return
       const message = getErrorMessage(error, 'Skema langkah tidak dapat diperiksa.')
       statuses.push({ status: 'error', message })
     }
@@ -1369,7 +1378,7 @@ async function loadPreview(): Promise<void> {
     totalRows.value = Number(response.totalRows)
     page.value = response.page
   } catch (error) {
-    if (request !== previewRequest) return
+    if (request !== previewRequest || isAbortLikeError(error)) return
     previewIsSampled.value = false
     previewError.value = getErrorMessage(error, 'Pratinjau tidak dapat dimuat.')
   } finally {

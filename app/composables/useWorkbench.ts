@@ -36,6 +36,7 @@ export type WorkbenchPreviewParams = {
 }
 
 export type WorkbenchPreviewResponse = {
+  aborted?: boolean
   columns: string[]
   rows: Record<string, unknown>[]
   totalRows: number
@@ -49,6 +50,24 @@ export type WorkbenchPreviewResponse = {
 
 const storageKey = 'bersihdata-workbench-v1'
 let previewAbortController: AbortController | null = null
+
+function isPreviewAbortError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  if (!error || typeof error !== 'object') return false
+  const err = error as {
+    name?: unknown
+    code?: unknown
+    statusCode?: unknown
+    status?: unknown
+    message?: unknown
+    cause?: unknown
+  }
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR') return true
+  if (err.statusCode === 499 || err.status === 499) return true
+  if (typeof err.message === 'string' && /\b(AbortError|aborted|Client Closed Request)\b/i.test(err.message)) return true
+  if (err.cause && err.cause !== error) return isPreviewAbortError(err.cause)
+  return false
+}
 
 function defaultSaveOptions(): WorkbenchSaveOptions {
   return {
@@ -203,15 +222,12 @@ export function useWorkbench() {
         },
         signal: controller.signal,
       })
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || data.aborted) {
         return { aborted: true }
       }
       return { aborted: false, data }
     } catch (error) {
-      if (
-        controller.signal.aborted
-        || (error instanceof Error && error.name === 'AbortError')
-      ) {
+      if (isPreviewAbortError(error, controller.signal)) {
         return { aborted: true }
       }
       throw error

@@ -10,6 +10,15 @@ type DisplayFilter = {
 
 const PREVIEW_SAMPLE_LIMIT = 5000
 
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown }
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || err.code === 'ECONNRESET') return true
+  if (typeof err.message === 'string' && /\b(abort(?:ed)?|cancel(?:led)?)\b/i.test(err.message)) return true
+  if (err.cause && err.cause !== error) return isAbortError(err.cause)
+  return false
+}
+
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const pipeline = body && typeof body === 'object' && 'source' in body && 'steps' in body ? body as any : null
@@ -24,7 +33,11 @@ export default defineEventHandler(async (event) => {
       abortController.abort()
     }
   }
+  const onRequestAborted = () => {
+    abortController.abort()
+  }
   event.node.res.on('close', onResponseClose)
+  event.node.req.on('aborted', onRequestAborted)
 
   try {
     const client = useClickHouse()
@@ -120,7 +133,27 @@ export default defineEventHandler(async (event) => {
       warnings: compiled.warnings,
       changesRowCount: compiled.changesRowCount,
     }
+  } catch (error) {
+    if (abortController.signal.aborted || isAbortError(error)) {
+      if (!event.node.res.headersSent) {
+        setResponseStatus(event, 499, 'Client Closed Request')
+      }
+      return {
+        aborted: true,
+        columns: [],
+        rows: [],
+        totalRows: 0,
+        page: 1,
+        limit: 50,
+        isSampled: true,
+        sampleLimit: PREVIEW_SAMPLE_LIMIT,
+        warnings: [],
+        changesRowCount: false,
+      }
+    }
+    throw error
   } finally {
     event.node.res.off('close', onResponseClose)
+    event.node.req.off('aborted', onRequestAborted)
   }
 })

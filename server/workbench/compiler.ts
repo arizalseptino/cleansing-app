@@ -12,6 +12,22 @@ function invalidStep(stepNumber: number, message: string): never {
   })
 }
 
+function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown }
+  if (err.name === 'AbortError' || err.code === 'ABORT_ERR' || err.code === 'ECONNRESET') return true
+  if (typeof err.message === 'string' && /\b(abort(?:ed)?|cancel(?:led)?)\b/i.test(err.message)) return true
+  if (err.cause && err.cause !== error) return isAbortError(err.cause)
+  return false
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return
+  const err = new Error('Query aborted')
+  err.name = 'AbortError'
+  throw err
+}
+
 function getStepReadColumns(op: string, params: Record<string, unknown>, writeColumns: string[]): string[] {
   const reads = new Set<string>(writeColumns)
   const addStr = (val: unknown) => {
@@ -184,6 +200,7 @@ export async function compilePipeline(
   let changesRowCount = false
 
   for (let index = 0; index < pipeline.steps.length; index += 1) {
+    throwIfAborted(options.abortSignal)
     const step = pipeline.steps[index]
     const operation = operations[step.op]
     if (!operation) {
@@ -246,6 +263,7 @@ export async function compilePipeline(
       const nextSql = stepSql.replace(/__INPUT__/g, `(${inputSql})`)
       currentSql = nextSql
 
+      throwIfAborted(options.abortSignal)
       schema = await resolveSchema(client, currentSql, boundParams, options.abortSignal)
       const writeColumns = [...new Set([...stepTouchedColumns, ...stepAddedColumns])]
       const requiresFullHistory = (step.op === 'add_column' && step.params?.kind === 'sequence')
@@ -266,6 +284,9 @@ export async function compilePipeline(
         warnings: compiled.warnings ?? [],
       })
     } catch (error) {
+      if (options.abortSignal?.aborted || isAbortError(error)) {
+        throw error
+      }
       const detail = error && typeof error === 'object' && 'message' in error ? String((error as { message?: string }).message) : ''
       stepSchemas.push({
         index,
