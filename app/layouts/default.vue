@@ -60,7 +60,6 @@
 
       <main class="wadah">
         <slot />
-        <footer class="footer">BersihData · proyek belajar dan riset cleansing data</footer>
       </main>
     </div>
   </div>
