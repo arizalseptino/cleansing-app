@@ -122,7 +122,7 @@
                       :disabled="etlProcessing || etlSyncing"
                       @click="clearEtlInputs"
                     >
-                      Bersihkan
+                      Hapus
                     </button>
                   </div>
                 </div>
