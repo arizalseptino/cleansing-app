@@ -1,60 +1,251 @@
 <template>
   <div class="workbench-page">
-    <section class="kartu wb-source" aria-label="Sumber data">
+    <section class="kartu wb-source" :class="{ 'wb-source-etl': sourceMode === 'etl' }" aria-label="Sumber data">
       <div class="wb-source-title">
-        <h2 class="card-title">Sumber</h2>
-        <p>Tabel sumber tidak diubah oleh pratinjau.</p>
+        <div class="wb-source-header">
+          <div>
+            <h2 class="card-title">Sumber</h2>
+            <p v-if="sourceMode === 'database'">Tabel sumber tidak diubah oleh pratinjau.</p>
+            <p v-else>Jalankan pipeline ETL Python otomatis dengan logika identik dan simpan ke ClickHouse.</p>
+          </div>
+          <div class="wb-mode-tabs" role="tablist" aria-label="Mode sumber data">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="sourceMode === 'database'"
+              class="wb-mode-tab"
+              :class="{ 'wb-mode-tab-active': sourceMode === 'database' }"
+              @click="setSourceMode('database')"
+            >
+              Database
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="sourceMode === 'etl'"
+              class="wb-mode-tab"
+              :class="{ 'wb-mode-tab-active': sourceMode === 'etl' }"
+              @click="setSourceMode('etl')"
+            >
+              ETL
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="wb-source-field">
-        <label for="workbench-database">Database</label>
-        <select
-          id="workbench-database"
-          :title="pipeline.source.database || 'Database'"
-          :value="pipeline.source.database"
-          :disabled="databasesPending || Boolean(databasesError)"
-          @change="changeDatabase"
+
+      <template v-if="sourceMode === 'database'">
+        <div class="wb-source-field">
+          <label for="workbench-database">Database</label>
+          <select
+            id="workbench-database"
+            :title="pipeline.source.database || 'Database'"
+            :value="pipeline.source.database"
+            :disabled="databasesPending || Boolean(databasesError)"
+            @change="changeDatabase"
+          >
+            <option value="">Pilih database</option>
+            <option v-for="database in databases" :key="database.name" :value="database.name">
+              {{ database.name }}
+            </option>
+          </select>
+        </div>
+        <div class="wb-source-field">
+          <label for="workbench-table">Tabel sumber</label>
+          <select
+            id="workbench-table"
+            :title="pipeline.source.table || 'Tabel sumber'"
+            :value="pipeline.source.table"
+            :disabled="!pipeline.source.database || tablesPending || Boolean(tablesError)"
+            @change="changeTable"
+          >
+            <option value="">Pilih tabel</option>
+            <option v-for="table in tables" :key="table.name" :value="table.name">
+              {{ table.name }}
+            </option>
+          </select>
+        </div>
+        <button
+          class="wb-button wb-primary wb-save-open"
+          type="button"
+          :disabled="!canOpenSave"
+          @click="openSaveDialog"
         >
-          <option value="">Pilih database</option>
-          <option v-for="database in databases" :key="database.name" :value="database.name">
-            {{ database.name }}
-          </option>
-        </select>
-      </div>
-      <div class="wb-source-field">
-        <label for="workbench-table">Tabel sumber</label>
-        <select
-          id="workbench-table"
-          :title="pipeline.source.table || 'Tabel sumber'"
-          :value="pipeline.source.table"
-          :disabled="!pipeline.source.database || tablesPending || Boolean(tablesError)"
-          @change="changeTable"
-        >
-          <option value="">Pilih tabel</option>
-          <option v-for="table in tables" :key="table.name" :value="table.name">
-            {{ table.name }}
-          </option>
-        </select>
-      </div>
-      <button
-        class="wb-button wb-primary wb-save-open"
-        type="button"
-        :disabled="!canOpenSave"
-        @click="openSaveDialog"
-      >
-        Simpan sebagai tabel baru
-      </button>
-      <p v-if="databasesPending" class="wb-message" role="status">Memuat daftar database...</p>
-      <p v-else-if="databasesError" class="wb-message wb-error" role="alert">
-        {{ databasesError }} <button class="wb-link-button" type="button" @click="loadDatabases">Coba lagi</button>
-      </p>
-      <p v-if="tablesPending" class="wb-message" role="status">Memuat daftar tabel...</p>
-      <p v-else-if="tablesError" class="wb-message wb-error" role="alert">
-        {{ tablesError }} <button class="wb-link-button" type="button" @click="loadTables(pipeline.source.database)">Coba lagi</button>
-      </p>
-      <p v-if="persistenceError" class="wb-message wb-error" role="alert">{{ persistenceError }}</p>
+          Simpan sebagai tabel baru
+        </button>
+        <p v-if="databasesPending" class="wb-message" role="status">Memuat daftar database...</p>
+        <p v-else-if="databasesError" class="wb-message wb-error" role="alert">
+          {{ databasesError }} <button class="wb-link-button" type="button" @click="loadDatabases">Coba lagi</button>
+        </p>
+        <p v-if="tablesPending" class="wb-message" role="status">Memuat daftar tabel...</p>
+        <p v-else-if="tablesError" class="wb-message wb-error" role="alert">
+          {{ tablesError }} <button class="wb-link-button" type="button" @click="loadTables(pipeline.source.database)">Coba lagi</button>
+        </p>
+        <p v-if="persistenceError" class="wb-message wb-error" role="alert">{{ persistenceError }}</p>
+      </template>
+
+      <template v-else>
+        <div class="wb-etl-controls">
+          <div class="wb-source-field wb-etl-pipeline-select">
+            <label for="etl-pipeline-select">Pilih Pipeline ETL</label>
+            <select
+              id="etl-pipeline-select"
+              :value="etlPipeline"
+              :disabled="etlProcessing || etlSyncing"
+              @change="changeEtlPipeline"
+            >
+              <option v-for="opt in etlPipelineOptions" :key="opt.id" :value="opt.id">
+                {{ opt.label }}
+              </option>
+            </select>
+            <small class="wb-etl-hint">Target: <code>{{ activeEtlMeta.targetTable }}</code></small>
+          </div>
+
+          <div class="wb-etl-dynamic-input">
+            <template v-if="etlPipeline === 'media_humas'">
+              <div class="wb-source-field">
+                <div class="wb-etl-input-top">
+                  <label for="etl-wa-textarea">Teks Rekap Broadcast WA (atau unggah .txt)</label>
+                  <div class="wb-etl-inline-tools">
+                    <label class="wb-button wb-small wb-file-label">
+                      Unggah .txt
+                      <input
+                        type="file"
+                        accept=".txt,text/plain"
+                        :disabled="etlProcessing || etlSyncing"
+                        @change="handleEtlFileChange"
+                      />
+                    </label>
+                    <button
+                      v-if="etlFile || etlRawText"
+                      type="button"
+                      class="wb-button wb-small"
+                      :disabled="etlProcessing || etlSyncing"
+                      @click="clearEtlInputs"
+                    >
+                      Bersihkan
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  id="etl-wa-textarea"
+                  v-model="etlRawText"
+                  class="wb-etl-textarea"
+                  rows="5"
+                  :disabled="etlProcessing || etlSyncing"
+                  placeholder="Tempel teks broadcast WA di sini (beserta periode tanggal &amp; header seksi seperti Media Online:, Berita Unit:, Media Sosial:)..."
+                />
+                <p v-if="etlFile" class="wb-etl-file-chip">
+                  File terpilih: <strong>{{ etlFile.name }}</strong> ({{ formatFileSize(etlFile.size) }})
+                </p>
+              </div>
+            </template>
+
+            <template v-else-if="etlPipeline === 'peserta_vpl' || etlPipeline === 'anggaran_sp2d'">
+              <div class="wb-etl-excel-wrap" :class="{ 'wb-etl-excel-with-date': etlPipeline === 'anggaran_sp2d' }">
+                <div class="wb-source-field">
+                  <label>File Excel (.xlsx)</label>
+                  <div
+                    class="wb-dropzone wb-etl-dropzone"
+                    :class="{ 'wb-dropzone-active': etlDragActive }"
+                    @dragover.prevent="etlDragActive = true"
+                    @dragleave.prevent="etlDragActive = false"
+                    @drop.prevent="handleEtlDrop"
+                  >
+                    <template v-if="etlFile">
+                      <p>
+                        <strong>{{ etlFile.name }}</strong> ({{ formatFileSize(etlFile.size) }})
+                      </p>
+                      <div class="wb-etl-file-actions">
+                        <label class="wb-button wb-small wb-file-label">
+                          Ganti file .xlsx
+                          <input
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            :disabled="etlProcessing || etlSyncing"
+                            @change="handleEtlFileChange"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          class="wb-button wb-small"
+                          :disabled="etlProcessing || etlSyncing"
+                          @click="clearEtlFile"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <p>Tarik dan lepas file <code>.xlsx</code> ke sini, atau pilih file</p>
+                      <label class="wb-button wb-small wb-file-label">
+                        Pilih file Excel (.xlsx)
+                        <input
+                          type="file"
+                          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          :disabled="etlProcessing || etlSyncing"
+                          @change="handleEtlFileChange"
+                        />
+                      </label>
+                    </template>
+                  </div>
+                </div>
+
+                <div v-if="etlPipeline === 'anggaran_sp2d'" class="wb-source-field">
+                  <label for="etl-sp2d-date">Tanggal Realisasi</label>
+                  <input
+                    id="etl-sp2d-date"
+                    v-model="etlTanggalRealisasi"
+                    type="date"
+                    class="wb-etl-date-input"
+                    :disabled="etlProcessing || etlSyncing"
+                  />
+                  <small class="wb-etl-hint">Disimpan pada kolom <code>tahun</code> (YYYY-MM-DD).</small>
+                </div>
+              </div>
+            </template>
+
+            <template v-else-if="etlPipeline === 'course_es'">
+              <div class="wb-etl-date-grid">
+                <div class="wb-source-field">
+                  <label for="etl-es-start">Dari Tanggal (<code>updatedAt</code>)</label>
+                  <input
+                    id="etl-es-start"
+                    v-model="etlStartDate"
+                    type="date"
+                    class="wb-etl-date-input"
+                    :disabled="etlProcessing || etlSyncing"
+                  />
+                </div>
+                <div class="wb-source-field">
+                  <label for="etl-es-end">Sampai Tanggal (<code>updatedAt</code>)</label>
+                  <input
+                    id="etl-es-end"
+                    v-model="etlEndDate"
+                    type="date"
+                    class="wb-etl-date-input"
+                    :disabled="etlProcessing || etlSyncing"
+                  />
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div class="wb-etl-submit-wrap">
+            <button
+              class="wb-button wb-primary wb-save-open"
+              type="button"
+              :disabled="!canRunEtl || etlProcessing || etlSyncing"
+              @click="runEtlPipeline('preview')"
+            >
+              {{ etlProcessing ? 'Memproses...' : 'Proses Data' }}
+            </button>
+          </div>
+        </div>
+        <p v-if="etlError" class="wb-etl-banner wb-etl-banner-error" role="alert">{{ etlError }}</p>
+      </template>
     </section>
 
-    <div class="wb-grid">
+    <div v-if="sourceMode === 'database'" class="wb-grid">
       <section class="kartu wb-steps-card" aria-label="Langkah cleansing">
         <div class="wb-card-heading">
           <div>
@@ -473,6 +664,111 @@
       </section>
     </div>
 
+    <section v-else class="kartu wb-etl-preview-card" aria-label="Pratinjau Hasil ETL">
+      <div class="wb-card-heading wb-data-heading">
+        <div class="wb-data-title">
+          <p class="page-kicker">Pratinjau</p>
+          <div class="wb-data-title-row">
+            <h2 class="card-title">Hasil Pipeline {{ activeEtlMeta.label }}</h2>
+            <span v-if="etlResult" class="wb-sample-badge">
+              {{ numberFormat(etlResult.total_rows) }} baris
+            </span>
+          </div>
+        </div>
+
+        <div class="wb-etl-header-actions">
+          <label class="wb-limit-field" for="etl-limit">
+            Baris per halaman
+            <select id="etl-limit" :value="etlLimit" @change="changeEtlLimit">
+              <option :value="25">25</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+            </select>
+          </label>
+          <button
+            class="wb-button"
+            type="button"
+            :disabled="!etlResult || !etlResult.download_token || etlProcessing || etlSyncing"
+            @click="downloadEtlCsv"
+          >
+            Unduh CSV
+          </button>
+          <button
+            class="wb-button wb-primary"
+            type="button"
+            :disabled="!etlResult || etlResult.total_rows === 0 || etlProcessing || etlSyncing"
+            @click="runEtlPipeline('sync_db')"
+          >
+            {{ etlSyncing ? 'Menyimpan...' : 'Simpan ke ClickHouse' }}
+          </button>
+        </div>
+      </div>
+
+      <p v-if="etlSyncMessage" class="wb-etl-banner wb-etl-banner-success" role="status">
+        {{ etlSyncMessage }}
+      </p>
+      <p v-if="etlProcessing" class="wb-message" role="status">
+        Sedang menjalankan skrip Python ETL. Mohon tunggu...
+      </p>
+      <p v-else-if="!etlResult" class="wb-message">
+        Pilih pipeline ETL, lengkapi input di atas, lalu klik <strong>Proses Data</strong> untuk melihat pratinjau hasil.
+      </p>
+      <template v-else>
+        <div v-if="etlSummaryChips.length" class="wb-etl-summary-bar" role="status">
+          <span v-for="chip in etlSummaryChips" :key="chip.label" class="wb-etl-summary-chip">
+            <strong>{{ chip.label }}:</strong> {{ chip.value }}
+          </span>
+        </div>
+        <p v-if="etlResult.rows.length === 0" class="wb-message" role="status">
+          {{ etlResult.message || 'Tidak ada baris hasil.' }}
+        </p>
+        <template v-else>
+          <div class="wb-table-viewport">
+            <table class="wb-table">
+              <thead>
+                <tr>
+                  <th v-for="col in etlResult.columns" :key="col" scope="col">
+                    <div class="wb-column-heading">
+                      <span class="wb-column-name" :title="col">{{ col }}</span>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, rowIdx) in etlPagedRows" :key="`${etlPage}-${rowIdx}`">
+                  <td v-for="col in etlResult.columns" :key="col">
+                    <span
+                      class="wb-cell"
+                      :class="{
+                        'wb-cell-null': row[col] === null,
+                        'wb-cell-empty': row[col] === '',
+                      }"
+                      :title="displayValue(row[col])"
+                    >
+                      {{ displayValue(row[col]) }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <nav class="wb-pagination" aria-label="Halaman data pratinjau ETL">
+            <span>
+              Total: <strong>{{ numberFormat(etlResult.total_rows) }}</strong> baris · Halaman {{ etlPage }} dari {{ etlTotalPages }}
+            </span>
+            <div>
+              <button class="wb-button wb-small" type="button" :disabled="etlPage <= 1" @click="changeEtlPage(etlPage - 1)">
+                Sebelumnya
+              </button>
+              <button class="wb-button wb-small" type="button" :disabled="etlPage >= etlTotalPages" @click="changeEtlPage(etlPage + 1)">
+                Berikutnya
+              </button>
+            </div>
+          </nav>
+        </template>
+      </template>
+    </section>
+
     <div v-if="showSqlPanel || showSaveDialog || showExportDialog || showImportDialog || showMappingDialog" class="wb-backdrop" @click.self="closePanels" />
     <section
       v-if="showSqlPanel"
@@ -888,6 +1184,115 @@ const columnMappingDraft = reactive<Record<string, string>>({})
 const sampleInfoRef = ref<HTMLElement | null>(null)
 const sampleTooltipPinned = ref(false)
 const sampleTooltipHover = ref(false)
+
+type SourceMode = 'database' | 'etl'
+type EtlPipelineId = 'media_humas' | 'peserta_vpl' | 'anggaran_sp2d' | 'course_es'
+type EtlResponse = {
+  status: 'ok' | 'error'
+  pipeline: EtlPipelineId
+  action: 'preview' | 'sync_db'
+  targetTable: string
+  columns: string[]
+  rows: PreviewRow[]
+  total_rows: number
+  csv_filename: string | null
+  download_token: string | null
+  summary: Record<string, unknown>
+  message: string
+}
+
+const etlPipelineOptions: Array<{ id: EtlPipelineId; label: string; targetTable: string }> = [
+  { id: 'media_humas', label: 'Publikasi Media Humas', targetTable: 'dataset.publikasi_media' },
+  { id: 'peserta_vpl', label: 'Peserta VPL', targetTable: 'db_vpl.vpl_series_atax' },
+  { id: 'anggaran_sp2d', label: 'Realisasi Anggaran SP2D', targetTable: 'dataset.anggaran' },
+  { id: 'course_es', label: 'Course Elasticsearch', targetTable: 'dataset.course_sibangkom' },
+]
+
+const todayIso = new Date().toISOString().slice(0, 10)
+const sourceMode = ref<SourceMode>('database')
+const etlPipeline = ref<EtlPipelineId>('media_humas')
+const etlRawText = ref('')
+const etlFile = ref<File | null>(null)
+const etlDragActive = ref(false)
+const etlStartDate = ref(todayIso)
+const etlEndDate = ref(todayIso)
+const etlTanggalRealisasi = ref(todayIso)
+const etlProcessing = ref(false)
+const etlSyncing = ref(false)
+const etlError = ref('')
+const etlSyncMessage = ref('')
+const etlResult = ref<EtlResponse | null>(null)
+const etlPage = ref(1)
+const etlLimit = ref(25)
+
+const activeEtlMeta = computed(() => (
+  etlPipelineOptions.find((item) => item.id === etlPipeline.value) ?? etlPipelineOptions[0]!
+))
+
+const canRunEtl = computed(() => {
+  if (etlPipeline.value === 'media_humas') {
+    return Boolean(etlRawText.value.trim() || etlFile.value)
+  }
+  if (etlPipeline.value === 'peserta_vpl' || etlPipeline.value === 'anggaran_sp2d') {
+    return Boolean(etlFile.value)
+  }
+  if (etlPipeline.value === 'course_es') {
+    return Boolean(etlStartDate.value && etlEndDate.value && etlStartDate.value <= etlEndDate.value)
+  }
+  return false
+})
+
+const etlTotalPages = computed(() => {
+  const total = etlResult.value?.total_rows ?? 0
+  return Math.max(1, Math.ceil(total / etlLimit.value))
+})
+
+const etlPagedRows = computed(() => {
+  const rows = etlResult.value?.rows ?? []
+  const start = (etlPage.value - 1) * etlLimit.value
+  return rows.slice(start, start + etlLimit.value)
+})
+
+const etlSummaryChips = computed(() => {
+  const result = etlResult.value
+  if (!result) return []
+  const s = result.summary || {}
+  const chips: Array<{ label: string; value: string }> = [
+    { label: 'Tabel Target', value: result.targetTable },
+  ]
+  if (typeof s.periode === 'string' && s.periode) {
+    chips.push({ label: 'Periode', value: s.periode })
+  }
+  if (s.by_jenis_berita && typeof s.by_jenis_berita === 'object') {
+    const parts = Object.entries(s.by_jenis_berita as Record<string, number>)
+      .map(([k, v]) => `${k}: ${numberFormat(v)}`)
+    if (parts.length) chips.push({ label: 'Jenis Berita', value: parts.join(' · ') })
+  }
+  if (s.by_disagregasi && typeof s.by_disagregasi === 'object') {
+    const parts = Object.entries(s.by_disagregasi as Record<string, number>)
+      .map(([k, v]) => `${k}: ${numberFormat(v)}`)
+    if (parts.length) chips.push({ label: 'Disagregasi', value: parts.join(' · ') })
+  }
+  if (typeof s.total_pagu_anggaran === 'number' && s.total_pagu_anggaran > 0) {
+    chips.push({ label: 'Total Pagu', value: `Rp ${numberFormat(s.total_pagu_anggaran)}` })
+  }
+  if (typeof s.total_sp2d_span === 'number' && s.total_sp2d_span > 0) {
+    chips.push({ label: 'Total SP2D', value: `Rp ${numberFormat(s.total_sp2d_span)}` })
+  }
+  if (typeof s.total_es_docs === 'number') {
+    chips.push({ label: 'Dokumen ES', value: numberFormat(s.total_es_docs) })
+  }
+  if (typeof s.total_pppk === 'number') {
+    chips.push({ label: 'Filter PPPK', value: numberFormat(s.total_pppk) })
+  }
+  if (typeof s.master_instansi_count === 'number' || typeof s.master_jf_count === 'number') {
+    chips.push({
+      label: 'Referensi BKN',
+      value: `${numberFormat(Number(s.master_instansi_count || 0))} instansi · ${numberFormat(Number(s.master_jf_count || 0))} JF`,
+    })
+  }
+  return chips
+})
 
 let schemaController: AbortController | null = null
 let rareController: AbortController | null = null
@@ -1760,6 +2165,161 @@ function clearDisplayFilter(): void {
   displayFilter.value = null
   page.value = 1
   void loadPreview()
+}
+
+function setSourceMode(mode: SourceMode): void {
+  sourceMode.value = mode
+  etlError.value = ''
+}
+
+function changeEtlPipeline(event: Event): void {
+  const next = (event.target as HTMLSelectElement).value as EtlPipelineId
+  etlPipeline.value = next
+  etlFile.value = null
+  etlRawText.value = ''
+  etlError.value = ''
+  etlSyncMessage.value = ''
+  etlResult.value = null
+  etlPage.value = 1
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+function assignEtlFile(file: File): void {
+  etlError.value = ''
+  const lower = file.name.toLowerCase()
+  if (etlPipeline.value === 'media_humas') {
+    if (!lower.endsWith('.txt')) {
+      etlError.value = 'Pipeline Publikasi Media Humas hanya menerima file .txt.'
+      return
+    }
+    etlFile.value = file
+    void file.text().then((txt) => {
+      etlRawText.value = txt
+    }).catch(() => {})
+    return
+  }
+  if (!lower.endsWith('.xlsx')) {
+    etlError.value = 'Pipeline ini hanya menerima file Excel (.xlsx).'
+    return
+  }
+  etlFile.value = file
+}
+
+function handleEtlFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) assignEtlFile(file)
+}
+
+function handleEtlDrop(event: DragEvent): void {
+  etlDragActive.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) assignEtlFile(file)
+}
+
+function clearEtlFile(): void {
+  etlFile.value = null
+}
+
+function clearEtlInputs(): void {
+  etlFile.value = null
+  etlRawText.value = ''
+  etlError.value = ''
+}
+
+function changeEtlPage(nextPage: number): void {
+  if (nextPage < 1 || nextPage > etlTotalPages.value) return
+  etlPage.value = nextPage
+}
+
+function changeEtlLimit(event: Event): void {
+  const nextLimit = Number((event.target as HTMLSelectElement).value)
+  if (![25, 50, 100].includes(nextLimit)) return
+  etlLimit.value = nextLimit
+  etlPage.value = 1
+}
+
+async function runEtlPipeline(action: 'preview' | 'sync_db'): Promise<void> {
+  if (!canRunEtl.value) return
+  etlError.value = ''
+  if (action === 'preview') {
+    etlProcessing.value = true
+    etlSyncMessage.value = ''
+  } else {
+    etlSyncing.value = true
+  }
+
+  try {
+    let response: EtlResponse
+    if (etlPipeline.value === 'course_es') {
+      response = await $fetch<EtlResponse>('/api/etl/run', {
+        method: 'POST',
+        body: {
+          pipeline: etlPipeline.value,
+          action,
+          startDate: etlStartDate.value,
+          endDate: etlEndDate.value,
+        },
+      })
+    } else if (etlPipeline.value === 'media_humas' && !etlFile.value) {
+      response = await $fetch<EtlResponse>('/api/etl/run', {
+        method: 'POST',
+        body: {
+          pipeline: etlPipeline.value,
+          action,
+          rawText: etlRawText.value,
+        },
+      })
+    } else {
+      const formData = new FormData()
+      formData.append('pipeline', etlPipeline.value)
+      formData.append('action', action)
+      if (etlFile.value) {
+        formData.append('file', etlFile.value)
+      }
+      if (etlPipeline.value === 'media_humas' && etlRawText.value.trim()) {
+        formData.append('rawText', etlRawText.value)
+      }
+      if (etlPipeline.value === 'anggaran_sp2d' && etlTanggalRealisasi.value) {
+        formData.append('tanggalRealisasi', etlTanggalRealisasi.value)
+      }
+      response = await $fetch<EtlResponse>('/api/etl/run', {
+        method: 'POST',
+        body: formData,
+      })
+    }
+
+    etlResult.value = response
+    if (action === 'preview') {
+      etlPage.value = 1
+    } else {
+      etlSyncMessage.value = response.message
+    }
+  } catch (error) {
+    etlError.value = getErrorMessage(error, 'Pipeline ETL gagal dijalankan.')
+  } finally {
+    etlProcessing.value = false
+    etlSyncing.value = false
+  }
+}
+
+function downloadEtlCsv(): void {
+  const token = etlResult.value?.download_token
+  if (!token) return
+  const filename = etlResult.value?.csv_filename || 'etl_output.csv'
+  const url = `/api/etl/download?token=${encodeURIComponent(token)}&filename=${encodeURIComponent(filename)}`
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
 }
 
 async function loadRareValues(): Promise<void> {
@@ -3340,8 +3900,198 @@ onUnmounted(() => {
 
 @media (max-width: 620px) {
   .wb-rare-controls,
-  .wb-mapping-row {
+  .wb-mapping-row,
+  .wb-etl-date-grid,
+  .wb-etl-excel-with-date {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.wb-source-etl {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.wb-source-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wb-mode-tabs {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 9px;
+  background: #f4f8fc;
+  gap: 3px;
+}
+
+.wb-mode-tab {
+  min-height: 34px;
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 7px;
+  color: #4b6178;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wb-mode-tab-active {
+  color: #fff;
+  background: var(--warna-utama);
+  font-weight: 700;
+}
+
+.wb-etl-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.wb-etl-dynamic-input {
+  min-width: 0;
+}
+
+.wb-etl-submit-wrap {
+  padding-top: 22px;
+}
+
+.wb-etl-hint {
+  color: var(--warna-redup);
+  font-size: 11px;
+}
+
+.wb-etl-input-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-etl-inline-tools,
+.wb-etl-file-actions,
+.wb-etl-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-etl-textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 112px;
+  padding: 10px 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.wb-etl-file-chip {
+  margin: 4px 0 0;
+  color: #375875;
+  font-size: 12px;
+}
+
+.wb-etl-excel-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.wb-etl-excel-with-date {
+  grid-template-columns: minmax(0, 1fr) 190px;
+  align-items: start;
+}
+
+.wb-etl-dropzone {
+  padding: 16px;
+}
+
+.wb-etl-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.wb-etl-date-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: var(--warna-teks);
+  background: #fff;
+  font: inherit;
+}
+
+.wb-etl-preview-card {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-etl-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wb-etl-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  color: #2f465c;
+  background: #f5f9fd;
+  font-size: 12px;
+}
+
+.wb-etl-banner {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.wb-etl-banner-error {
+  border: 1px solid #f0c8c4;
+  color: #8a352e;
+  background: #fdf0ee;
+}
+
+.wb-etl-banner-success {
+  margin-top: 0;
+  margin-bottom: 12px;
+  border: 1px solid #c9dec1;
+  color: #315d27;
+  background: #edf5e9;
+}
+
+@media (max-width: 900px) {
+  .wb-etl-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wb-etl-submit-wrap {
+    padding-top: 0;
   }
 }
 </style>

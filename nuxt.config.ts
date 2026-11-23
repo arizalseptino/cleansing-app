@@ -21,5 +21,9 @@ export default defineNuxtConfig({
     clickhouseUrl: '',
     clickhouseUser: '',
     clickhousePassword: '',
+    elasticsearchUrl: '',
+    elasticsearchUser: '',
+    elasticsearchPassword: '',
+    pythonBin: '',
   },
 })
