@@ -30,6 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", default="")
     parser.add_argument("--end-date", default="")
     parser.add_argument("--tanggal-realisasi", default="")
+    parser.add_argument("--target-db", default="")
+    parser.add_argument("--target-table", default="")
+    parser.add_argument("--engine", default="MergeTree")
+    parser.add_argument("--order-by", default="")
     parser.add_argument("--json-params", default="")
     return parser.parse_args()
 
@@ -43,6 +47,10 @@ def main() -> int:
         "start_date": args.start_date or None,
         "end_date": args.end_date or None,
         "tanggal_realisasi": args.tanggal_realisasi or None,
+        "target_db": args.target_db or None,
+        "target_table": args.target_table or None,
+        "engine": args.engine or "MergeTree",
+        "order_by": args.order_by or None,
     }
 
     if args.raw_text_file:

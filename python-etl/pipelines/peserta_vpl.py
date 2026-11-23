@@ -13,6 +13,8 @@ from .common import (
     read_csv_dicts,
     read_excel_sheets,
     serialize_rows_for_json,
+    sync_to_custom_table,
+    validate_custom_target_params,
     write_csv_to_tmp,
 )
 
@@ -34,6 +36,23 @@ COLS_SCHEMA = [
     "tanggal_webinar",
     "judul_webinar",
     "tahun_kegiatan",
+]
+
+OUTPUT_SCHEMA = [
+    {"name": "id", "type": "UInt64"},
+    {"name": "series_vpl", "type": "Nullable(String)"},
+    {"name": "nama_peserta", "type": "Nullable(String)"},
+    {"name": "email", "type": "Nullable(String)"},
+    {"name": "jenis_kelamin", "type": "Nullable(String)"},
+    {"name": "jabatan_raw", "type": "Nullable(String)"},
+    {"name": "instansi_raw", "type": "Nullable(String)"},
+    {"name": "jenis_instansi", "type": "Nullable(String)"},
+    {"name": "asal_daerah", "type": "Nullable(String)"},
+    {"name": "jabatan_clean", "type": "Nullable(String)"},
+    {"name": "instansi_clean", "type": "Nullable(String)"},
+    {"name": "tanggal_webinar", "type": "Nullable(Date)"},
+    {"name": "judul_webinar", "type": "Nullable(String)"},
+    {"name": "tahun_kegiatan", "type": "UInt16"},
 ]
 
 STR_COLS: Set[str] = {
@@ -559,10 +578,17 @@ def _ensure_table(client: ClickHouseClientWrapper) -> None:
 def run(
     action: str = "preview",
     input_path: Optional[str] = None,
+    target_db: Optional[str] = None,
+    target_table: Optional[str] = None,
+    engine: Optional[str] = None,
+    order_by: Optional[str] = None,
     **_: Any,
 ) -> Dict[str, Any]:
     if not input_path or not os.path.exists(input_path):
         raise ValueError("File Excel (.xlsx) Peserta VPL wajib diunggah.")
+
+    custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, OUTPUT_SCHEMA)
+    effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
 
     instansi_ref, jf_ref = load_master_references()
     ov_inst = load_manual_overrides(REFERENCES_DIR / "manual_override_instansi.csv")
@@ -617,9 +643,6 @@ def run(
         tahun_counts[yr] = tahun_counts.get(yr, 0) + 1
 
     if action == "sync_db":
-        client = ClickHouseClientWrapper(get_clickhouse_config())
-        _ensure_table(client)
-        client.command(f"TRUNCATE TABLE {TABLE_NAME}")
         payload: List[List[Any]] = []
         for rec in records:
             entry: List[Any] = []
@@ -636,8 +659,24 @@ def run(
                 else:
                     entry.append(val)
             payload.append(entry)
-        client.insert(TABLE_NAME, payload, column_names=COLS_SCHEMA)
-        msg = f"Berhasil menjalankan TRUNCATE + INSERT {len(payload)} baris peserta VPL ke {TABLE_NAME}."
+
+        client = ClickHouseClientWrapper(get_clickhouse_config())
+        if custom_target is not None:
+            effective_target = sync_to_custom_table(
+                client=client,
+                target_db=custom_target[0],
+                target_table=custom_target[1],
+                engine=custom_target[2],
+                order_by=custom_target[3],
+                column_schema=OUTPUT_SCHEMA,
+                rows_payload=payload,
+            )
+            msg = f"Berhasil membuat tabel baru {effective_target} ({custom_target[2]}) dan memasukkan {len(payload)} baris hasil ETL."
+        else:
+            _ensure_table(client)
+            client.command(f"TRUNCATE TABLE {TABLE_NAME}")
+            client.insert(TABLE_NAME, payload, column_names=COLS_SCHEMA)
+            msg = f"Berhasil menjalankan TRUNCATE + INSERT {len(payload)} baris peserta VPL ke {TABLE_NAME}."
     else:
         msg = f"Berhasil menstandarisasi {len(records)} baris peserta VPL ({', '.join(sheet_notes)})."
 
@@ -649,8 +688,9 @@ def run(
         "status": "ok",
         "pipeline": "peserta_vpl",
         "action": action,
-        "targetTable": TABLE_NAME,
+        "targetTable": effective_target,
         "columns": COLS_SCHEMA,
+        "column_schema": OUTPUT_SCHEMA,
         "rows": serialized,
         "total_rows": len(serialized),
         "csv_path": csv_path,

@@ -9,6 +9,8 @@ from .common import (
     is_missing,
     read_excel_sheets,
     serialize_rows_for_json,
+    sync_to_custom_table,
+    validate_custom_target_params,
     write_csv_to_tmp,
 )
 
@@ -24,6 +26,19 @@ OUTPUT_COLUMNS = [
     "sisa_dana",
     "persen_realisasi",
     "id",
+]
+
+OUTPUT_SCHEMA = [
+    {"name": "satker_lan", "type": "String"},
+    {"name": "tahun", "type": "String"},
+    {"name": "disagregasi", "type": "String"},
+    {"name": "klasifikasi", "type": "String"},
+    {"name": "alias", "type": "String"},
+    {"name": "pagu_anggaran", "type": "String"},
+    {"name": "sp2d_span", "type": "String"},
+    {"name": "sisa_dana", "type": "String"},
+    {"name": "persen_realisasi", "type": "Float64"},
+    {"name": "id", "type": "UInt64"},
 ]
 
 
@@ -215,10 +230,17 @@ def run(
     action: str = "preview",
     input_path: Optional[str] = None,
     tanggal_realisasi: Optional[str] = None,
+    target_db: Optional[str] = None,
+    target_table: Optional[str] = None,
+    engine: Optional[str] = None,
+    order_by: Optional[str] = None,
     **_: Any,
 ) -> Dict[str, Any]:
     if not input_path or not os.path.exists(input_path):
         raise ValueError("File Excel (.xlsx) Realisasi Anggaran SP2D wajib diunggah.")
+
+    custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, OUTPUT_SCHEMA)
+    effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
 
     tahun_date = (tanggal_realisasi or "").strip() or dt.date.today().isoformat()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", tahun_date):
@@ -242,7 +264,23 @@ def run(
     total_before = 0
     total_after = 0
 
-    if action == "sync_db":
+    if action == "sync_db" and custom_target is not None:
+        for idx, rec in enumerate(combined):
+            rec["id"] = idx + 1
+        insert_data = [[rec[col] for col in OUTPUT_COLUMNS] for rec in combined]
+        client = ClickHouseClientWrapper(ch_conf)
+        effective_target = sync_to_custom_table(
+            client=client,
+            target_db=custom_target[0],
+            target_table=custom_target[1],
+            engine=custom_target[2],
+            order_by=custom_target[3],
+            column_schema=OUTPUT_SCHEMA,
+            rows_payload=insert_data,
+        )
+        total_after = len(insert_data)
+        msg = f"Berhasil membuat tabel baru {effective_target} ({custom_target[2]}) dan memasukkan {len(insert_data)} baris hasil ETL."
+    elif action == "sync_db":
         client = ClickHouseClientWrapper(ch_conf)
         _ensure_table(client)
         count_rows = client.query_rows(f"SELECT count(*) FROM {TABLE_NAME}")
@@ -294,8 +332,9 @@ def run(
         "status": "ok",
         "pipeline": "anggaran_sp2d",
         "action": action,
-        "targetTable": TABLE_NAME,
+        "targetTable": effective_target,
         "columns": OUTPUT_COLUMNS,
+        "column_schema": OUTPUT_SCHEMA,
         "rows": serialized,
         "total_rows": len(serialized),
         "csv_path": csv_path,

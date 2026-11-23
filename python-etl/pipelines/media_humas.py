@@ -8,6 +8,8 @@ from .common import (
     ClickHouseClientWrapper,
     get_clickhouse_config,
     serialize_rows_for_json,
+    sync_to_custom_table,
+    validate_custom_target_params,
     write_csv_to_tmp,
 )
 
@@ -25,6 +27,19 @@ OUTPUT_COLUMNS = [
     "TAUTAN BERITA",
     "RAW",
     "LINK MEDIA",
+]
+
+OUTPUT_SCHEMA = [
+    {"name": "ID", "type": "UInt64"},
+    {"name": "JENIS BERITA", "type": "String"},
+    {"name": "TANGGAL AWAL", "type": "Nullable(Date)"},
+    {"name": "TANGGAL AKHIR", "type": "Nullable(Date)"},
+    {"name": "NAMA MEDIA", "type": "Nullable(String)"},
+    {"name": "SATKER_CODE", "type": "Nullable(String)"},
+    {"name": "JUDUL BERITA", "type": "String"},
+    {"name": "TAUTAN BERITA", "type": "String"},
+    {"name": "RAW", "type": "Nullable(String)"},
+    {"name": "LINK MEDIA", "type": "Nullable(String)"},
 ]
 
 DB_COLUMNS = [
@@ -296,6 +311,10 @@ def run(
     action: str = "preview",
     input_path: Optional[str] = None,
     raw_text: Optional[str] = None,
+    target_db: Optional[str] = None,
+    target_table: Optional[str] = None,
+    engine: Optional[str] = None,
+    order_by: Optional[str] = None,
     **_: Any,
 ) -> Dict[str, Any]:
     text = raw_text or ""
@@ -305,14 +324,18 @@ def run(
     if not text.strip():
         raise ValueError("Teks broadcast WA atau file .txt wajib diisi untuk pipeline Publikasi Media Humas.")
 
+    custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, OUTPUT_SCHEMA)
+    effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
+
     parsed = parse_chat_mingguan(text)
     if not parsed:
         return {
             "status": "ok",
             "pipeline": "media_humas",
             "action": action,
-            "targetTable": TABLE_NAME,
+            "targetTable": effective_target,
             "columns": OUTPUT_COLUMNS,
+            "column_schema": OUTPUT_SCHEMA,
             "rows": [],
             "total_rows": 0,
             "csv_path": None,
@@ -344,7 +367,37 @@ def run(
     inserted_count = 0
     skipped_duplicate_count = 0
 
-    if action == "sync_db":
+    if action == "sync_db" and custom_target is not None:
+        client = ClickHouseClientWrapper(ch_conf)
+        output_rows: List[Dict[str, Any]] = []
+        payload: List[List[Any]] = []
+        for idx, rec in enumerate(parsed):
+            rec_id = idx + 1
+            output_rows.append({"ID": rec_id, **rec})
+            payload.append([
+                int(rec_id),
+                str(rec["JENIS BERITA"]),
+                rec["TANGGAL AWAL"],
+                rec["TANGGAL AKHIR"],
+                None if rec["NAMA MEDIA"] is None else str(rec["NAMA MEDIA"]),
+                None if rec["SATKER_CODE"] is None else str(rec["SATKER_CODE"]),
+                str(rec["JUDUL BERITA"] or ""),
+                str(rec["TAUTAN BERITA"]),
+                None if rec["RAW"] is None else str(rec["RAW"]),
+                None if rec["LINK MEDIA"] is None else str(rec["LINK MEDIA"]),
+            ])
+        effective_target = sync_to_custom_table(
+            client=client,
+            target_db=custom_target[0],
+            target_table=custom_target[1],
+            engine=custom_target[2],
+            order_by=custom_target[3],
+            column_schema=OUTPUT_SCHEMA,
+            rows_payload=payload,
+        )
+        inserted_count = len(payload)
+        msg = f"Berhasil membuat tabel baru {effective_target} ({custom_target[2]}) dan memasukkan {inserted_count} baris hasil ETL."
+    elif action == "sync_db":
         client = ClickHouseClientWrapper(ch_conf)
         _ensure_table(client)
         existing_rows = client.query_rows(f"SELECT id, tautan_berita FROM {TABLE_NAME}")
@@ -353,8 +406,8 @@ def run(
 
         new_records = _dedupe_records(parsed, existing_keys)
         skipped_duplicate_count = len(parsed) - len(new_records)
-        payload: List[List[Any]] = []
-        output_rows: List[Dict[str, Any]] = []
+        payload = []
+        output_rows = []
 
         for idx, rec in enumerate(new_records):
             rec_id = next_id + idx
@@ -395,8 +448,9 @@ def run(
         "status": "ok",
         "pipeline": "media_humas",
         "action": action,
-        "targetTable": TABLE_NAME,
+        "targetTable": effective_target,
         "columns": OUTPUT_COLUMNS,
+        "column_schema": OUTPUT_SCHEMA,
         "rows": serialized,
         "total_rows": len(serialized),
         "csv_path": csv_path,

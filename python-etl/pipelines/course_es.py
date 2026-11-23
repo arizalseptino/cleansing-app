@@ -16,6 +16,8 @@ from .common import (
     get_clickhouse_config,
     read_csv_dicts,
     serialize_rows_for_json,
+    sync_to_custom_table,
+    validate_custom_target_params,
     write_csv_to_tmp,
 )
 
@@ -177,6 +179,10 @@ def run(
     action: str = "preview",
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    target_db: Optional[str] = None,
+    target_table: Optional[str] = None,
+    engine: Optional[str] = None,
+    order_by: Optional[str] = None,
     **_: Any,
 ) -> Dict[str, Any]:
     if not start_date or not end_date:
@@ -285,11 +291,38 @@ def run(
     if not available_columns:
         available_columns = list(SELECTED_COLUMNS)
 
+    column_schema = [
+        {"name": col, "type": "String" if col == "uuid" else "Nullable(String)"}
+        for col in available_columns
+    ]
+    custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, column_schema)
+    effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
+
     selected_rows = [{col: r.get(col) for col in available_columns} for r in filtered_rows]
     serialized = serialize_rows_for_json(available_columns, selected_rows)
 
     inserted_count = 0
-    if action == "sync_db" and serialized:
+    if action == "sync_db" and custom_target is not None:
+        client = ClickHouseClientWrapper(get_clickhouse_config())
+        payload = [
+            [
+                ("" if col == "uuid" else None) if row.get(col) is None else str(row.get(col))
+                for col in available_columns
+            ]
+            for row in serialized
+        ]
+        effective_target = sync_to_custom_table(
+            client=client,
+            target_db=custom_target[0],
+            target_table=custom_target[1],
+            engine=custom_target[2],
+            order_by=custom_target[3],
+            column_schema=column_schema,
+            rows_payload=payload,
+        )
+        inserted_count = len(payload)
+        msg = f"Berhasil membuat tabel baru {effective_target} ({custom_target[2]}) dan memasukkan {inserted_count} baris hasil ETL."
+    elif action == "sync_db" and serialized:
         client = ClickHouseClientWrapper(get_clickhouse_config())
         _ensure_table(client, available_columns)
         db_cols = [_sanitize_col(c) for c in available_columns]
@@ -318,8 +351,9 @@ def run(
         "status": "ok",
         "pipeline": "course_es",
         "action": action,
-        "targetTable": TABLE_NAME,
+        "targetTable": effective_target,
         "columns": available_columns,
+        "column_schema": column_schema,
         "rows": serialized,
         "total_rows": len(serialized),
         "csv_path": csv_path,

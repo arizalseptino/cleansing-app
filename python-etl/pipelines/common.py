@@ -490,5 +490,87 @@ class ClickHouseClientWrapper:
             obj = {col: json_safe_value(row[idx]) for idx, col in enumerate(column_names)}
             lines.append(json.dumps(obj, ensure_ascii=False))
         payload = ("\n".join(lines) + "\n").encode("utf-8")
-        cols_sql = ", ".join(column_names)
+        cols_sql = ", ".join(quote_ch_ident(col) for col in column_names)
         self._http_request(f"INSERT INTO {table} ({cols_sql}) FORMAT JSONEachRow", body=payload)
+
+
+VALID_CUSTOM_ENGINES = {"MergeTree", "ReplacingMergeTree"}
+VALID_DB_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+VALID_TABLE_IDENT_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+SYSTEM_DATABASES = {"system", "information_schema", "bersihdata"}
+
+
+def quote_ch_ident(identifier: str) -> str:
+    return "`" + identifier.replace("\\", "\\\\").replace("`", "\\`") + "`"
+
+
+def validate_custom_target_params(
+    target_db: Optional[str],
+    target_table: Optional[str],
+    engine: Optional[str],
+    order_by: Optional[str],
+    column_schema: List[Dict[str, str]],
+) -> Optional[Tuple[str, str, str, Optional[str]]]:
+    db = (target_db or "").strip()
+    tbl = (target_table or "").strip()
+    if not db and not tbl:
+        return None
+    if not db or not tbl:
+        raise ValueError("Parameter target_db dan target_table wajib diisi bersamaan.")
+    if not VALID_DB_IDENT_RE.fullmatch(db):
+        raise ValueError("Nama database tujuan tidak valid.")
+    if db.lower() in SYSTEM_DATABASES:
+        raise ValueError("Database sistem atau aplikasi tidak dapat dipilih sebagai tujuan.")
+    if not VALID_TABLE_IDENT_RE.fullmatch(tbl):
+        raise ValueError("Nama tabel tujuan harus diawali huruf, maksimal 64 karakter, dan hanya berisi huruf, angka, atau garis bawah.")
+
+    chosen_engine = (engine or "MergeTree").strip() or "MergeTree"
+    if chosen_engine not in VALID_CUSTOM_ENGINES:
+        raise ValueError("Engine tabel harus MergeTree atau ReplacingMergeTree.")
+
+    chosen_order = (order_by or "").strip() or None
+    if chosen_order is not None:
+        matched = next((col for col in column_schema if col.get("name") == chosen_order), None)
+        if not matched:
+            raise ValueError(f"Kolom ORDER BY '{chosen_order}' tidak ditemukan pada skema hasil ETL.")
+        if "Nullable(" in (matched.get("type") or ""):
+            raise ValueError(f"Kolom ORDER BY '{chosen_order}' bertipe Nullable dan tidak dapat dipilih.")
+
+    return db, tbl, chosen_engine, chosen_order
+
+
+def sync_to_custom_table(
+    client: ClickHouseClientWrapper,
+    target_db: str,
+    target_table: str,
+    engine: str,
+    order_by: Optional[str],
+    column_schema: List[Dict[str, str]],
+    rows_payload: List[List[Any]],
+) -> str:
+    validated = validate_custom_target_params(target_db, target_table, engine, order_by, column_schema)
+    if validated is None:
+        raise ValueError("Target database dan tabel tidak valid.")
+    db, tbl, chosen_engine, chosen_order = validated
+
+    existing = client.query_rows(
+        f"SELECT name FROM system.tables WHERE database = '{db}' AND name = '{tbl}' LIMIT 1"
+    )
+    if existing:
+        raise ValueError(f"Tabel {db}.{tbl} sudah ada. Pilih nama tabel lain agar tabel yang sudah ada tidak diubah.")
+
+    db_q = quote_ch_ident(db)
+    tbl_q = quote_ch_ident(tbl)
+    client.command(f"CREATE DATABASE IF NOT EXISTS {db_q}")
+
+    col_defs = ", ".join(f"{quote_ch_ident(col['name'])} {col['type']}" for col in column_schema)
+    order_clause = quote_ch_ident(chosen_order) if chosen_order else "tuple()"
+    create_sql = f"CREATE TABLE {db_q}.{tbl_q} ({col_defs}) ENGINE = {chosen_engine} ORDER BY {order_clause}"
+    client.command(create_sql)
+
+    col_names = [col["name"] for col in column_schema]
+    if rows_payload:
+        client.insert(f"{db}.{tbl}", rows_payload, column_names=col_names)
+
+    return f"{db}.{tbl}"
+

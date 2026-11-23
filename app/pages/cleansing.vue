@@ -699,7 +699,15 @@
             :disabled="!etlResult || etlResult.total_rows === 0 || etlProcessing || etlSyncing"
             @click="runEtlPipeline('sync_db')"
           >
-            {{ etlSyncing ? 'Menyimpan...' : 'Simpan ke ClickHouse' }}
+            {{ etlSyncing ? 'Menyimpan...' : `Simpan ke ${activeEtlMeta.targetTable}` }}
+          </button>
+          <button
+            class="wb-button"
+            type="button"
+            :disabled="!etlResult || etlResult.total_rows === 0 || etlProcessing || etlSyncing || applying"
+            @click="openEtlSaveDialog"
+          >
+            Simpan sebagai tabel baru
           </button>
         </div>
       </div>
@@ -814,11 +822,13 @@
         <button v-if="!applying" class="wb-icon-button" type="button" @click="closeSaveDialog">Tutup</button>
       </div>
       <template v-if="applyResult">
-        <p class="wb-safety-note">Tabel sumber tetap tidak diubah.</p>
+        <p class="wb-safety-note">
+          {{ saveDialogMode === 'database' ? 'Tabel sumber tetap tidak diubah.' : 'Tabel bawaan ETL tetap tidak diubah.' }}
+        </p>
         <dl class="wb-summary">
           <div><dt>Tabel hasil</dt><dd><code>{{ applyResult.database }}.{{ applyResult.table }}</code></dd></div>
           <div><dt>Jumlah baris</dt><dd>{{ numberFormat(applyResult.rows) }}</dd></div>
-          <div><dt>Jumlah langkah</dt><dd>{{ numberFormat(applyResult.steps) }}</dd></div>
+          <div v-if="saveDialogMode === 'database'"><dt>Jumlah langkah</dt><dd>{{ numberFormat(applyResult.steps) }}</dd></div>
           <div><dt>Durasi</dt><dd>{{ applyResult.durationMs === undefined ? 'Tidak dikirim API' : `${numberFormat(applyResult.durationMs)} ms` }}</dd></div>
           <div><dt>Verifikasi</dt><dd>{{ applyResult.verification ?? 'Hasil verifikasi tidak dikirim API.' }}</dd></div>
         </dl>
@@ -830,7 +840,23 @@
       </template>
       <template v-else>
         <form class="wb-save-form" @submit.prevent="applyPipeline">
-          <p class="wb-safety-note">Tabel sumber <code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> tidak akan diubah.</p>
+          <p v-if="saveDialogMode === 'database'" class="wb-safety-note">
+            Tabel sumber <code>{{ pipeline.source.database }}.{{ pipeline.source.table }}</code> tidak akan diubah.
+          </p>
+          <p v-else class="wb-safety-note">
+            Hasil ETL <strong>{{ activeEtlMeta.label }}</strong> akan disimpan ke tabel baru tanpa mengubah tabel bawaan
+            <code>{{ activeEtlMeta.targetTable }}</code>.
+          </p>
+
+          <label for="wb-result-database">Pilih Database</label>
+          <select id="wb-result-database" v-model="resultDatabase" :disabled="applying || saveDialogMode === 'database'" required>
+            <option v-if="!saveDatabaseOptions.length" value="" disabled>Tidak ada database tersedia</option>
+            <option v-for="db in saveDatabaseOptions" :key="db" :value="db">{{ db }}</option>
+          </select>
+          <p v-if="resultDatabase && !validResultDatabase" class="wb-error" role="alert">
+            Pilih nama database tujuan yang valid selain database sistem.
+          </p>
+
           <label for="wb-result-name">Nama tabel hasil</label>
           <input id="wb-result-name" v-model="resultTableName" maxlength="64" required :disabled="applying" />
           <p v-if="resultTableName && !validResultName" class="wb-error" role="alert">
@@ -846,7 +872,7 @@
           <fieldset class="wb-order-fields" :disabled="applying">
             <legend>Kolom ORDER BY</legend>
             <p>Pilih satu kolom untuk mengurutkan tabel hasil.</p>
-            <label v-for="column in finalSchema" :key="column.name" class="wb-order-option">
+            <label v-for="column in activeSaveColumns" :key="column.name" class="wb-order-option">
               <input
                 :checked="orderBy[0] === column.name"
                 type="radio"
@@ -859,30 +885,32 @@
             </label>
           </fieldset>
 
-          <label class="wb-save-original">
-            <input v-model="saveOriginal" type="checkbox" :disabled="applying || originalColumnNames.length === 0" />
-            <span>
-              Simpan nilai sebelum perubahan
-              <template v-if="originalColumnNames.length">
-                di <code>{{ originalColumnNames.map((column) => `${column}_asli`).join(', ') }}</code>
-              </template>
-              <template v-else> (tidak ada kolom sumber yang memenuhi syarat)</template>
-            </span>
-          </label>
-          <p class="wb-message">Nilai yang disimpan berasal langsung dari tabel sumber, sebelum langkah pipeline dijalankan.</p>
+          <template v-if="saveDialogMode === 'database'">
+            <label class="wb-save-original">
+              <input v-model="saveOriginal" type="checkbox" :disabled="applying || originalColumnNames.length === 0" />
+              <span>
+                Simpan nilai sebelum perubahan
+                <template v-if="originalColumnNames.length">
+                  di <code>{{ originalColumnNames.map((column) => `${column}_asli`).join(', ') }}</code>
+                </template>
+                <template v-else> (tidak ada kolom sumber yang memenuhi syarat)</template>
+              </span>
+            </label>
+            <p class="wb-message">Nilai yang disimpan berasal langsung dari tabel sumber, sebelum langkah pipeline dijalankan.</p>
 
-          <div>
-            <h3>Ringkasan langkah</h3>
-            <ol class="wb-summary-steps">
-              <li v-for="(step, index) in pipeline.steps" :key="step.id">
-                {{ index + 1 }}. {{ operationName(step.op) }} — {{ touchedColumns(step).join(', ') || 'Tanpa kolom langsung' }}
-              </li>
-            </ol>
-          </div>
+            <div>
+              <h3>Ringkasan langkah</h3>
+              <ol class="wb-summary-steps">
+                <li v-for="(step, index) in pipeline.steps" :key="step.id">
+                  {{ index + 1 }}. {{ operationName(step.op) }} — {{ touchedColumns(step).join(', ') || 'Tanpa kolom langsung' }}
+                </li>
+              </ol>
+            </div>
+          </template>
           <div>
             <h3>Kolom hasil</h3>
             <ul class="wb-result-columns">
-              <li v-for="column in finalSchema" :key="column.name">{{ column.name }} <small>({{ column.type }})</small></li>
+              <li v-for="column in activeSaveColumns" :key="column.name">{{ column.name }} <small>({{ column.type }})</small></li>
             </ul>
           </div>
           <p v-if="applyError" class="wb-error" role="alert">{{ applyError }}</p>
@@ -1148,6 +1176,8 @@ const formKey = ref(0)
 const activeColumnMenu = ref('')
 const showSqlPanel = ref(false)
 const showSaveDialog = ref(false)
+const saveDialogMode = ref<'database' | 'etl'>('database')
+const resultDatabase = ref('')
 const resultTableName = ref('')
 const resultEngine = ref<'MergeTree' | 'ReplacingMergeTree'>('MergeTree')
 const orderBy = ref<string[]>([])
@@ -1193,11 +1223,13 @@ type EtlResponse = {
   action: 'preview' | 'sync_db'
   targetTable: string
   columns: string[]
+  column_schema?: Column[]
   rows: PreviewRow[]
   total_rows: number
   csv_filename: string | null
   download_token: string | null
   summary: Record<string, unknown>
+  durationMs?: number
   message: string
 }
 
@@ -1332,17 +1364,47 @@ const schemaBeforeSelectedStep = computed(() => selectedStep.value > 0
       : finalSchema.value)
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / limit.value)))
 const validResultName = computed(() => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(resultTableName.value))
+const validResultDatabase = computed(() => (
+  /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(resultDatabase.value)
+  && !['system', 'information_schema', 'bersihdata'].includes(resultDatabase.value.toLowerCase())
+))
+const activeSaveColumns = computed<Column[]>(() => {
+  if (saveDialogMode.value === 'etl') {
+    if (etlResult.value?.column_schema?.length) return etlResult.value.column_schema
+    return (etlResult.value?.columns ?? []).map((name) => ({ name, type: 'String' }))
+  }
+  return finalSchema.value
+})
+const saveDatabaseOptions = computed<string[]>(() => {
+  const names = new Set<string>()
+  for (const db of databases.value) {
+    if (!['system', 'information_schema', 'bersihdata'].includes(db.name.toLowerCase())) {
+      names.add(db.name)
+    }
+  }
+  if (saveDialogMode.value === 'etl') {
+    const [defaultDb] = activeEtlMeta.value.targetTable.split('.')
+    if (defaultDb) names.add(defaultDb)
+  } else if (pipeline.value.source.database) {
+    names.add(pipeline.value.source.database)
+  }
+  return [...names]
+})
 const originalColumnNames = computed(() => [...new Set(
   pipeline.value.steps
     .filter((step) => step.op !== 'add_column' && step.op !== 'manage_columns')
     .flatMap((step) => touchedColumns(step)),
-) ].filter((name) => sourceColumns.value.some((column) => column.name === name)))
-const canApply = computed(() => sourceReady.value
-  && pipeline.value.steps.length > 0
-  && validResultName.value
-  && !applying.value
-  && stepStates.value.length === pipeline.value.steps.length
-  && stepStates.value.every(({ status }) => status === 'valid'))
+)].filter((name) => sourceColumns.value.some((column) => column.name === name)))
+const canApply = computed(() => {
+  if (applying.value || !validResultName.value || !validResultDatabase.value) return false
+  if (saveDialogMode.value === 'etl') {
+    return Boolean(etlResult.value && etlResult.value.total_rows > 0 && canRunEtl.value)
+  }
+  return sourceReady.value
+    && pipeline.value.steps.length > 0
+    && stepStates.value.length === pipeline.value.steps.length
+    && stepStates.value.every(({ status }) => status === 'valid')
+})
 const canOpenSave = computed(() => sourceReady.value
   && pipeline.value.steps.length > 0
   && stepStates.value.length === pipeline.value.steps.length
@@ -2002,11 +2064,35 @@ function clearSavePollTimer(): void {
 }
 
 function openSaveDialog(): void {
+  saveDialogMode.value = 'database'
   const sourceName = pipeline.value.source.table
+  resultDatabase.value = pipeline.value.source.database
   resultTableName.value = `${sourceName}_cleaned`.slice(0, 64)
   resultEngine.value = pipeline.value.saveOptions.engine
   orderBy.value = [...pipeline.value.saveOptions.orderBy]
   saveOriginal.value = pipeline.value.saveOptions.saveOriginal
+  applyError.value = ''
+  applyResult.value = null
+  applyProgress.value = null
+  showSaveDialog.value = true
+}
+
+function openEtlSaveDialog(): void {
+  if (!etlResult.value || etlResult.value.total_rows === 0) return
+  saveDialogMode.value = 'etl'
+  const [defaultDb, defaultTbl] = activeEtlMeta.value.targetTable.split('.')
+  resultDatabase.value = defaultDb || saveDatabaseOptions.value[0] || 'dataset'
+  const baseName = (defaultTbl || activeEtlMeta.value.id).replace(/[^A-Za-z0-9_]/g, '_')
+  resultTableName.value = `${baseName}_baru`.slice(0, 64)
+  resultEngine.value = 'MergeTree'
+
+  const schema = etlResult.value.column_schema?.length
+    ? etlResult.value.column_schema
+    : etlResult.value.columns.map((name) => ({ name, type: 'String' }))
+  const nonNullable = schema.filter((col) => !isNullable(col.type))
+  const preferred = nonNullable.find((col) => ['id', 'uuid'].includes(col.name.toLowerCase())) ?? nonNullable[0]
+  orderBy.value = preferred ? [preferred.name] : []
+
   applyError.value = ''
   applyResult.value = null
   applyProgress.value = null
@@ -2019,6 +2105,45 @@ function selectOrderBy(column: string): void {
 
 async function applyPipeline(): Promise<void> {
   if (!canApply.value) return
+  if (saveDialogMode.value === 'etl') {
+    applying.value = true
+    applyError.value = ''
+    applyProgress.value = {
+      currentStep: 0,
+      totalSteps: 1,
+      message: 'Membuat tabel baru dari hasil ETL di ClickHouse...',
+    }
+    try {
+      const response = await executeEtlRequest('sync_db', {
+        targetDb: resultDatabase.value,
+        targetTable: resultTableName.value,
+        engine: resultEngine.value,
+        orderBy: orderBy.value[0] || '',
+      })
+      etlResult.value = response
+      etlSyncMessage.value = response.message
+      const [resDb, resTbl] = (response.targetTable || `${resultDatabase.value}.${resultTableName.value}`).split('.')
+      const targetDbName = resDb || resultDatabase.value
+      const targetTableName = resTbl || resultTableName.value
+      await loadDatabases()
+      await loadTables(targetDbName)
+      applyResult.value = {
+        status: 'done',
+        database: targetDbName,
+        table: targetTableName,
+        rows: response.total_rows,
+        steps: 0,
+        durationMs: response.durationMs,
+        verification: response.message,
+      }
+    } catch (error) {
+      applyError.value = getErrorMessage(error, 'Tabel hasil ETL tidak dapat dibuat.')
+    } finally {
+      applying.value = false
+    }
+    return
+  }
+
   clearSavePollTimer()
   const pollRun = activeSavePollRun
   applying.value = true
@@ -2245,6 +2370,65 @@ function changeEtlLimit(event: Event): void {
   etlPage.value = 1
 }
 
+type EtlCustomTargetPayload = {
+  targetDb: string
+  targetTable: string
+  engine: 'MergeTree' | 'ReplacingMergeTree'
+  orderBy: string
+}
+
+async function executeEtlRequest(
+  action: 'preview' | 'sync_db',
+  customTarget?: EtlCustomTargetPayload,
+): Promise<EtlResponse> {
+  if (etlPipeline.value === 'course_es') {
+    return await $fetch<EtlResponse>('/api/etl/run', {
+      method: 'POST',
+      body: {
+        pipeline: etlPipeline.value,
+        action,
+        startDate: etlStartDate.value,
+        endDate: etlEndDate.value,
+        ...(customTarget ?? {}),
+      },
+    })
+  }
+  if (etlPipeline.value === 'media_humas' && !etlFile.value) {
+    return await $fetch<EtlResponse>('/api/etl/run', {
+      method: 'POST',
+      body: {
+        pipeline: etlPipeline.value,
+        action,
+        rawText: etlRawText.value,
+        ...(customTarget ?? {}),
+      },
+    })
+  }
+
+  const formData = new FormData()
+  formData.append('pipeline', etlPipeline.value)
+  formData.append('action', action)
+  if (etlFile.value) {
+    formData.append('file', etlFile.value)
+  }
+  if (etlPipeline.value === 'media_humas' && etlRawText.value.trim()) {
+    formData.append('rawText', etlRawText.value)
+  }
+  if (etlPipeline.value === 'anggaran_sp2d' && etlTanggalRealisasi.value) {
+    formData.append('tanggalRealisasi', etlTanggalRealisasi.value)
+  }
+  if (customTarget) {
+    formData.append('targetDb', customTarget.targetDb)
+    formData.append('targetTable', customTarget.targetTable)
+    formData.append('engine', customTarget.engine)
+    formData.append('orderBy', customTarget.orderBy)
+  }
+  return await $fetch<EtlResponse>('/api/etl/run', {
+    method: 'POST',
+    body: formData,
+  })
+}
+
 async function runEtlPipeline(action: 'preview' | 'sync_db'): Promise<void> {
   if (!canRunEtl.value) return
   etlError.value = ''
@@ -2256,50 +2440,13 @@ async function runEtlPipeline(action: 'preview' | 'sync_db'): Promise<void> {
   }
 
   try {
-    let response: EtlResponse
-    if (etlPipeline.value === 'course_es') {
-      response = await $fetch<EtlResponse>('/api/etl/run', {
-        method: 'POST',
-        body: {
-          pipeline: etlPipeline.value,
-          action,
-          startDate: etlStartDate.value,
-          endDate: etlEndDate.value,
-        },
-      })
-    } else if (etlPipeline.value === 'media_humas' && !etlFile.value) {
-      response = await $fetch<EtlResponse>('/api/etl/run', {
-        method: 'POST',
-        body: {
-          pipeline: etlPipeline.value,
-          action,
-          rawText: etlRawText.value,
-        },
-      })
-    } else {
-      const formData = new FormData()
-      formData.append('pipeline', etlPipeline.value)
-      formData.append('action', action)
-      if (etlFile.value) {
-        formData.append('file', etlFile.value)
-      }
-      if (etlPipeline.value === 'media_humas' && etlRawText.value.trim()) {
-        formData.append('rawText', etlRawText.value)
-      }
-      if (etlPipeline.value === 'anggaran_sp2d' && etlTanggalRealisasi.value) {
-        formData.append('tanggalRealisasi', etlTanggalRealisasi.value)
-      }
-      response = await $fetch<EtlResponse>('/api/etl/run', {
-        method: 'POST',
-        body: formData,
-      })
-    }
-
+    const response = await executeEtlRequest(action)
     etlResult.value = response
     if (action === 'preview') {
       etlPage.value = 1
     } else {
       etlSyncMessage.value = response.message
+      void loadDatabases()
     }
   } catch (error) {
     etlError.value = getErrorMessage(error, 'Pipeline ETL gagal dijalankan.')
@@ -2619,6 +2766,7 @@ watch([showSqlPanel, showSaveDialog, showExportDialog, showImportDialog, showMap
 })
 
 watch([resultEngine, orderBy, saveOriginal], ([engine, nextOrderBy, nextSaveOriginal]) => {
+  if (saveDialogMode.value !== 'database') return
   workbench.setSaveOptions({
     engine,
     orderBy: [...nextOrderBy],

@@ -7,9 +7,23 @@ import Busboy from 'busboy'
 import Papa from 'papaparse'
 import { recordCleansingHistory } from '../../features/cleansing-history'
 import { useClickHouse } from '../../utils/clickhouse'
+import { isSystemDatabase, quoteIdentifier } from '../../workbench/utils'
 
 type PipelineId = 'media_humas' | 'peserta_vpl' | 'anggaran_sp2d' | 'course_es'
 type EtlAction = 'preview' | 'sync_db'
+type CustomEngine = 'MergeTree' | 'ReplacingMergeTree'
+
+interface ColumnSchemaItem {
+  name: string
+  type: string
+}
+
+interface CustomTargetSpec {
+  targetDb: string
+  targetTable: string
+  engine: CustomEngine
+  orderBy: string | null
+}
 
 interface PythonEtlResult {
   status: 'ok' | 'error'
@@ -17,6 +31,7 @@ interface PythonEtlResult {
   action: EtlAction
   targetTable?: string
   columns: string[]
+  column_schema?: ColumnSchemaItem[]
   rows: Record<string, unknown>[]
   total_rows: number
   csv_path: string | null
@@ -263,12 +278,153 @@ function toMockCsvWithNames(columns: string[], rows: Record<string, unknown>[]):
   return Papa.unparse({ fields: columns, data })
 }
 
+const VALID_CUSTOM_ENGINES = new Set<CustomEngine>(['MergeTree', 'ReplacingMergeTree'])
+
+function parseCustomTargetSpec(fields: Record<string, string>): CustomTargetSpec | null {
+  const targetDb = (fields.targetDb || '').trim()
+  const targetTable = (fields.targetTable || '').trim()
+  if (!targetDb && !targetTable) return null
+
+  if (!targetDb || !targetTable) {
+    throw createError({ statusCode: 400, message: 'Database dan nama tabel tujuan wajib diisi bersamaan.' })
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(targetDb)) {
+    throw createError({ statusCode: 400, message: 'Nama database tujuan tidak valid.' })
+  }
+  if (isSystemDatabase(targetDb)) {
+    throw createError({ statusCode: 400, message: 'Pilih database selain database sistem dan database aplikasi.' })
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(targetTable)) {
+    throw createError({
+      statusCode: 400,
+      message: 'Nama tabel harus diawali huruf, maksimal 64 karakter, dan hanya berisi huruf, angka, atau garis bawah.',
+    })
+  }
+
+  const rawEngine = (fields.engine || 'MergeTree').trim() || 'MergeTree'
+  if (!VALID_CUSTOM_ENGINES.has(rawEngine as CustomEngine)) {
+    throw createError({ statusCode: 400, message: 'Engine tabel harus MergeTree atau ReplacingMergeTree.' })
+  }
+
+  const orderBy = (fields.orderBy || '').trim() || null
+  return {
+    targetDb,
+    targetTable,
+    engine: rawEngine as CustomEngine,
+    orderBy,
+  }
+}
+
+function defaultValueForNonNullableType(type: string): string | number {
+  const trimmed = type.trim()
+  if (/^(U?Int\d+|Float\d+|Decimal)/.test(trimmed)) return 0
+  return ''
+}
+
 async function syncRowsToMockClickHouse(
   pipeline: PipelineId,
   result: PythonEtlResult,
+  customTarget: CustomTargetSpec | null = null,
 ): Promise<PythonEtlResult> {
   const client = useClickHouse()
   const rows = result.rows || []
+
+  if (customTarget) {
+    const schema: ColumnSchemaItem[] = result.column_schema && result.column_schema.length > 0
+      ? result.column_schema
+      : (result.columns || []).map((name) => ({ name, type: 'String' }))
+
+    if (schema.length === 0) {
+      throw createError({ statusCode: 400, message: 'Skema kolom hasil ETL kosong sehingga tabel tidak dapat dibuat.' })
+    }
+
+    if (customTarget.orderBy) {
+      const matched = schema.find((col) => col.name === customTarget.orderBy)
+      if (!matched) {
+        throw createError({
+          statusCode: 400,
+          message: `Kolom ORDER BY "${customTarget.orderBy}" tidak ditemukan pada skema hasil ETL.`,
+        })
+      }
+      if (/Nullable\s*\(/.test(matched.type)) {
+        throw createError({
+          statusCode: 400,
+          message: `Kolom ORDER BY "${customTarget.orderBy}" bertipe Nullable dan tidak dapat dipilih.`,
+        })
+      }
+    }
+
+    const existingCheck = await client.query({
+      query: 'SELECT name FROM system.tables WHERE database = {database:String} AND name = {table:String} LIMIT 1',
+      query_params: { database: customTarget.targetDb, table: customTarget.targetTable },
+      format: 'JSONEachRow',
+    })
+    const existingRows = await existingCheck.json<Array<{ name: string }>>()
+    if (existingRows.length > 0) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'Tabel sudah ada',
+        message: `Tabel ${customTarget.targetDb}.${customTarget.targetTable} sudah ada. Gunakan nama tabel lain.`,
+      })
+    }
+
+    const dbQuoted = quoteIdentifier(customTarget.targetDb)
+    const tblQuoted = quoteIdentifier(customTarget.targetTable)
+    await client.command({ query: `CREATE DATABASE IF NOT EXISTS ${dbQuoted}` })
+
+    const colDefs = schema.map((col) => `${quoteIdentifier(col.name)} ${col.type}`).join(', ')
+    const orderClause = customTarget.orderBy ? quoteIdentifier(customTarget.orderBy) : 'tuple()'
+    await client.command({
+      query: `CREATE TABLE ${dbQuoted}.${tblQuoted} (${colDefs}) ENGINE = ${customTarget.engine} ORDER BY ${orderClause}`,
+    })
+
+    const normalizedRows = rows.map((row, idx) => {
+      const next: Record<string, unknown> = {}
+      for (const col of schema) {
+        let val = row[col.name]
+        if (col.name === 'id' && pipeline === 'anggaran_sp2d') {
+          val = idx + 1
+        } else if (col.name === 'ID' && pipeline === 'media_humas') {
+          val = idx + 1
+        }
+        if (val === null || val === undefined) {
+          next[col.name] = /Nullable\s*\(/.test(col.type) ? null : defaultValueForNonNullableType(col.type)
+        } else {
+          next[col.name] = val
+        }
+      }
+      return next
+    })
+
+    if (normalizedRows.length > 0) {
+      const colNames = schema.map((col) => col.name)
+      await client.insert({
+        table: `${customTarget.targetDb}.${customTarget.targetTable}`,
+        values: toMockCsvWithNames(colNames, normalizedRows),
+        format: 'CSVWithNames',
+        columns: colNames.map((col) => quoteIdentifier(col)),
+      })
+    }
+
+    const fullTarget = `${customTarget.targetDb}.${customTarget.targetTable}`
+    return {
+      ...result,
+      action: 'sync_db',
+      targetTable: fullTarget,
+      column_schema: schema,
+      rows: normalizedRows,
+      total_rows: normalizedRows.length,
+      summary: {
+        ...result.summary,
+        inserted_count: normalizedRows.length,
+        table_rows_after: normalizedRows.length,
+        custom_target: true,
+        engine: customTarget.engine,
+        order_by: customTarget.orderBy,
+      },
+      message: `Berhasil membuat tabel baru ${fullTarget} (${customTarget.engine}) dan memasukkan ${normalizedRows.length} baris hasil ETL.`,
+    }
+  }
 
   if (pipeline === 'media_humas') {
     await client.command({ query: 'CREATE DATABASE IF NOT EXISTS dataset' })
@@ -534,10 +690,37 @@ export default defineEventHandler(async (event) => {
     }
     action = rawAction
 
+    const customTarget = action === 'sync_db' ? parseCustomTargetSpec(fields) : null
+    if (customTarget) {
+      const existingCheck = await useClickHouse().query({
+        query: 'SELECT name FROM system.tables WHERE database = {database:String} AND name = {table:String} LIMIT 1',
+        query_params: { database: customTarget.targetDb, table: customTarget.targetTable },
+        format: 'JSONEachRow',
+      })
+      const existingRows = await existingCheck.json<Array<{ name: string }>>()
+      if (existingRows.length > 0) {
+        throw createError({
+          statusCode: 409,
+          statusMessage: 'Tabel sudah ada',
+          message: `Tabel ${customTarget.targetDb}.${customTarget.targetTable} sudah ada. Gunakan nama tabel lain.`,
+        })
+      }
+    }
+
     const hasRealClickHouse = Boolean(config.clickhouseUrl && String(config.clickhouseUrl).trim())
     const pythonAction: EtlAction = action === 'sync_db' && hasRealClickHouse ? 'sync_db' : 'preview'
 
     const args: string[] = ['--pipeline', pipeline, '--action', pythonAction]
+    if (pythonAction === 'sync_db' && customTarget) {
+      args.push(
+        '--target-db', customTarget.targetDb,
+        '--target-table', customTarget.targetTable,
+        '--engine', customTarget.engine,
+      )
+      if (customTarget.orderBy) {
+        args.push('--order-by', customTarget.orderBy)
+      }
+    }
 
     if (pipeline === 'media_humas') {
       const rawText = fields.rawText || ''
@@ -614,7 +797,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (action === 'sync_db' && !hasRealClickHouse) {
-      parsedOutput = await syncRowsToMockClickHouse(pipeline, parsedOutput)
+      parsedOutput = await syncRowsToMockClickHouse(pipeline, parsedOutput, customTarget)
     }
 
     if (action === 'sync_db') {
@@ -626,7 +809,19 @@ export default defineEventHandler(async (event) => {
           sourceDatabase: targetDb || 'etl',
           sourceTable: pipeline,
           resultTable: targetTbl || target,
-          parameters: { pipeline, action, summary: parsedOutput.summary },
+          parameters: {
+            pipeline,
+            action,
+            ...(customTarget
+              ? {
+                  targetDb: customTarget.targetDb,
+                  targetTable: customTarget.targetTable,
+                  engine: customTarget.engine,
+                  orderBy: customTarget.orderBy,
+                }
+              : {}),
+            summary: parsedOutput.summary,
+          },
           sourceRows: parsedOutput.total_rows,
           filledRows: parsedOutput.total_rows,
           ambiguousRows: 0,
@@ -648,11 +843,13 @@ export default defineEventHandler(async (event) => {
       action: parsedOutput.action,
       targetTable: parsedOutput.targetTable || PIPELINE_TARGET_TABLES[pipeline],
       columns: parsedOutput.columns,
+      column_schema: parsedOutput.column_schema ?? [],
       rows: parsedOutput.rows,
       total_rows: parsedOutput.total_rows,
       csv_filename: parsedOutput.csv_filename,
       download_token: downloadToken,
       summary: parsedOutput.summary,
+      durationMs: Date.now() - startedAt,
       message: parsedOutput.message,
     }
   } finally {
