@@ -225,7 +225,7 @@
                         </div>
                       </template>
                       <template v-else>
-                        <p>Tarik dan lepas berkas <code>.xlsx</code> tambahan ke sini, atau pilih file</p>
+                        <p>Tarik dan lepas berkas <code>.xlsx</code> ke sini, atau pilih file</p>
                         <label class="wb-button wb-small wb-file-label">
                           Tambah File Lain (.xlsx)
                           <input
