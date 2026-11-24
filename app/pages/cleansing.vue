@@ -205,26 +205,147 @@
             </template>
 
             <template v-else-if="etlPipeline === 'course_es'">
-              <div class="wb-etl-date-grid">
+              <div class="wb-etl-course-wrap">
                 <div class="wb-source-field">
-                  <label for="etl-es-start">Dari Tanggal (<code>updatedAt</code>)</label>
-                  <input
-                    id="etl-es-start"
-                    v-model="etlStartDate"
-                    type="date"
-                    class="wb-etl-date-input"
-                    :disabled="etlProcessing || etlSyncing"
-                  />
+                  <span class="wb-field-label">Sumber Data</span>
+                  <div class="wb-etl-source-toggle" role="radiogroup" aria-label="Sumber data Course Elasticsearch">
+                    <label
+                      class="wb-etl-radio-option"
+                      :class="{ 'wb-etl-radio-active': etlCourseEsSourceMode === 'api' }"
+                    >
+                      <input
+                        v-model="etlCourseEsSourceMode"
+                        type="radio"
+                        name="course-es-source-mode"
+                        value="api"
+                        :disabled="etlProcessing || etlSyncing"
+                        @change="onCourseEsSourceModeChange"
+                      />
+                      <span>Server Elasticsearch (API)</span>
+                    </label>
+                    <label
+                      class="wb-etl-radio-option"
+                      :class="{ 'wb-etl-radio-active': etlCourseEsSourceMode === 'file' }"
+                    >
+                      <input
+                        v-model="etlCourseEsSourceMode"
+                        type="radio"
+                        name="course-es-source-mode"
+                        value="file"
+                        :disabled="etlProcessing || etlSyncing"
+                        @change="onCourseEsSourceModeChange"
+                      />
+                      <span>Unggah File Export (.json / .csv)</span>
+                    </label>
+                  </div>
                 </div>
-                <div class="wb-source-field">
-                  <label for="etl-es-end">Sampai Tanggal (<code>updatedAt</code>)</label>
-                  <input
-                    id="etl-es-end"
-                    v-model="etlEndDate"
-                    type="date"
-                    class="wb-etl-date-input"
-                    :disabled="etlProcessing || etlSyncing"
-                  />
+
+                <div v-if="etlCourseEsSourceMode === 'api'" class="wb-etl-date-grid">
+                  <div class="wb-source-field">
+                    <label for="etl-es-start">Dari Tanggal (<code>updatedAt</code>)</label>
+                    <input
+                      id="etl-es-start"
+                      v-model="etlStartDate"
+                      type="date"
+                      class="wb-etl-date-input"
+                      :disabled="etlProcessing || etlSyncing"
+                    />
+                  </div>
+                  <div class="wb-source-field">
+                    <label for="etl-es-end">Sampai Tanggal (<code>updatedAt</code>)</label>
+                    <input
+                      id="etl-es-end"
+                      v-model="etlEndDate"
+                      type="date"
+                      class="wb-etl-date-input"
+                      :disabled="etlProcessing || etlSyncing"
+                    />
+                  </div>
+                </div>
+
+                <div v-else class="wb-etl-file-mode">
+                  <div class="wb-source-field">
+                    <label>File Export Elasticsearch (.json / .csv)</label>
+                    <div
+                      class="wb-dropzone wb-etl-dropzone"
+                      :class="{ 'wb-dropzone-active': etlDragActive }"
+                      @dragover.prevent="etlDragActive = true"
+                      @dragleave.prevent="etlDragActive = false"
+                      @drop.prevent="handleEtlDrop"
+                    >
+                      <template v-if="etlFile">
+                        <p>
+                          <strong>{{ etlFile.name }}</strong> ({{ formatFileSize(etlFile.size) }})
+                        </p>
+                        <div class="wb-etl-file-actions">
+                          <label class="wb-button wb-small wb-file-label">
+                            Ganti file .json / .csv
+                            <input
+                              type="file"
+                              accept=".json,.csv,application/json,text/csv"
+                              :disabled="etlProcessing || etlSyncing"
+                              @change="handleEtlFileChange"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            class="wb-button wb-small"
+                            :disabled="etlProcessing || etlSyncing"
+                            @click="clearEtlFile"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <p>Tarik dan lepas file <code>.json</code> (array, NDJSON, atau <code>hits.hits</code>) atau <code>.csv</code> ke sini, atau pilih file</p>
+                        <label class="wb-button wb-small wb-file-label">
+                          Pilih file (.json / .csv)
+                          <input
+                            type="file"
+                            accept=".json,.csv,application/json,text/csv"
+                            :disabled="etlProcessing || etlSyncing"
+                            @change="handleEtlFileChange"
+                          />
+                        </label>
+                      </template>
+                    </div>
+                  </div>
+
+                  <div class="wb-etl-date-grid">
+                    <div class="wb-source-field">
+                      <label for="etl-es-file-start">Dari Tanggal (<code>updatedAt</code>, opsional)</label>
+                      <input
+                        id="etl-es-file-start"
+                        v-model="etlFileStartDate"
+                        type="date"
+                        class="wb-etl-date-input"
+                        :disabled="etlProcessing || etlSyncing"
+                      />
+                    </div>
+                    <div class="wb-source-field">
+                      <label for="etl-es-file-end">Sampai Tanggal (<code>updatedAt</code>, opsional)</label>
+                      <input
+                        id="etl-es-file-end"
+                        v-model="etlFileEndDate"
+                        type="date"
+                        class="wb-etl-date-input"
+                        :disabled="etlProcessing || etlSyncing"
+                      />
+                    </div>
+                  </div>
+                  <small class="wb-etl-hint">
+                    Filter tanggal bersifat opsional. Kosongkan untuk memproses seluruh data di dalam file.
+                    <button
+                      v-if="etlFileStartDate || etlFileEndDate"
+                      type="button"
+                      class="wb-link-button"
+                      :disabled="etlProcessing || etlSyncing"
+                      @click="clearEtlCourseFileDates"
+                    >
+                      Reset tanggal
+                    </button>
+                  </small>
                 </div>
               </div>
             </template>
@@ -1243,11 +1364,14 @@ const etlPipelineOptions: Array<{ id: EtlPipelineId; label: string; targetTable:
 const todayIso = new Date().toISOString().slice(0, 10)
 const sourceMode = ref<SourceMode>('database')
 const etlPipeline = ref<EtlPipelineId>('media_humas')
+const etlCourseEsSourceMode = ref<'api' | 'file'>('api')
 const etlRawText = ref('')
 const etlFile = ref<File | null>(null)
 const etlDragActive = ref(false)
 const etlStartDate = ref(todayIso)
 const etlEndDate = ref(todayIso)
+const etlFileStartDate = ref('')
+const etlFileEndDate = ref('')
 const etlTanggalRealisasi = ref(todayIso)
 const etlProcessing = ref(false)
 const etlSyncing = ref(false)
@@ -1269,6 +1393,11 @@ const canRunEtl = computed(() => {
     return Boolean(etlFile.value)
   }
   if (etlPipeline.value === 'course_es') {
+    if (etlCourseEsSourceMode.value === 'file') {
+      if (!etlFile.value) return false
+      if (etlFileStartDate.value && etlFileEndDate.value && etlFileStartDate.value > etlFileEndDate.value) return false
+      return true
+    }
     return Boolean(etlStartDate.value && etlEndDate.value && etlStartDate.value <= etlEndDate.value)
   }
   return false
@@ -2308,6 +2437,15 @@ function changeEtlPipeline(event: Event): void {
   etlPage.value = 1
 }
 
+function onCourseEsSourceModeChange(): void {
+  etlError.value = ''
+}
+
+function clearEtlCourseFileDates(): void {
+  etlFileStartDate.value = ''
+  etlFileEndDate.value = ''
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -2326,6 +2464,14 @@ function assignEtlFile(file: File): void {
     void file.text().then((txt) => {
       etlRawText.value = txt
     }).catch(() => {})
+    return
+  }
+  if (etlPipeline.value === 'course_es') {
+    if (!lower.endsWith('.json') && !lower.endsWith('.csv')) {
+      etlError.value = 'Pipeline Course Elasticsearch mode file hanya menerima file .json atau .csv.'
+      return
+    }
+    etlFile.value = file
     return
   }
   if (!lower.endsWith('.xlsx')) {
@@ -2381,12 +2527,13 @@ async function executeEtlRequest(
   action: 'preview' | 'sync_db',
   customTarget?: EtlCustomTargetPayload,
 ): Promise<EtlResponse> {
-  if (etlPipeline.value === 'course_es') {
+  if (etlPipeline.value === 'course_es' && etlCourseEsSourceMode.value === 'api') {
     return await $fetch<EtlResponse>('/api/etl/run', {
       method: 'POST',
       body: {
         pipeline: etlPipeline.value,
         action,
+        sourceMode: 'api',
         startDate: etlStartDate.value,
         endDate: etlEndDate.value,
         ...(customTarget ?? {}),
@@ -2410,6 +2557,11 @@ async function executeEtlRequest(
   formData.append('action', action)
   if (etlFile.value) {
     formData.append('file', etlFile.value)
+  }
+  if (etlPipeline.value === 'course_es') {
+    formData.append('sourceMode', 'file')
+    if (etlFileStartDate.value) formData.append('startDate', etlFileStartDate.value)
+    if (etlFileEndDate.value) formData.append('endDate', etlFileEndDate.value)
   }
   if (etlPipeline.value === 'media_humas' && etlRawText.value.trim()) {
     formData.append('rawText', etlRawText.value)
@@ -4166,6 +4318,53 @@ onUnmounted(() => {
 
 .wb-etl-dropzone {
   padding: 16px;
+}
+
+.wb-etl-course-wrap,
+.wb-etl-file-mode {
+  display: grid;
+  gap: 12px;
+}
+
+.wb-field-label {
+  color: #40566d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.wb-etl-source-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wb-etl-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 8px;
+  background: #fff;
+  color: #40566d;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.wb-etl-radio-option input[type='radio'] {
+  margin: 0;
+  accent-color: var(--warna-utama);
+  cursor: pointer;
+}
+
+.wb-etl-radio-active {
+  border-color: var(--warna-utama);
+  background: #edf5fc;
+  color: #24507a;
+  font-weight: 650;
 }
 
 .wb-etl-date-grid {

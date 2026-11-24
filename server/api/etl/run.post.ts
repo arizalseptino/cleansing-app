@@ -142,9 +142,9 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
     busboy.on('file', (_fieldname, stream, info) => {
       const originalName = info?.filename || 'upload.bin'
       const ext = path.extname(originalName).toLowerCase()
-      if (!['.xlsx', '.txt', '.csv'].includes(ext)) {
+      if (!['.xlsx', '.txt', '.csv', '.json'].includes(ext)) {
         stream.resume()
-        fail(createError({ statusCode: 400, message: `Ekstensi file tidak diizinkan (${ext || 'kosong'}). Gunakan .xlsx atau .txt.` }))
+        fail(createError({ statusCode: 400, message: `Ekstensi file tidak diizinkan (${ext || 'kosong'}). Gunakan .xlsx, .txt, .json, atau .csv.` }))
         return
       }
       uploadedOriginalName = originalName
@@ -629,7 +629,7 @@ async function syncRowsToMockClickHouse(
         for (const origCol of result.columns) {
           const safe = origCol.replace(/[^A-Za-z0-9_]/g, '_')
           const v = r[origCol]
-          obj[safe] = v === null || v === undefined ? null : String(v)
+          obj[safe] = v === null || v === undefined ? (safe === 'uuid' ? '' : null) : String(v)
         }
         return obj
       })
@@ -760,15 +760,37 @@ export default defineEventHandler(async (event) => {
         args.push('--tanggal-realisasi', tgl)
       }
     } else if (pipeline === 'course_es') {
-      if (!fields.startDate || !fields.endDate) {
-        throw createError({ statusCode: 400, message: 'Dari Tanggal dan Sampai Tanggal wajib diisi.' })
+      const esSourceMode = (fields.sourceMode || '').trim()
+      if (uploadedFilePath || esSourceMode === 'file') {
+        if (!uploadedFilePath) {
+          throw createError({ statusCode: 400, message: 'Unggah file export (.json atau .csv) terlebih dahulu.' })
+        }
+        const ext = path.extname(uploadedFilePath).toLowerCase()
+        if (ext !== '.json' && ext !== '.csv') {
+          throw createError({ statusCode: 400, message: 'Pipeline Course Elasticsearch mode file hanya menerima file .json atau .csv.' })
+        }
+        args.push('--input-path', uploadedFilePath)
+
+        const rawStart = (fields.startDate || '').trim()
+        const rawEnd = (fields.endDate || '').trim()
+        const startDate = rawStart ? validateIsoDate(rawStart, 'Dari Tanggal') : ''
+        const endDate = rawEnd ? validateIsoDate(rawEnd, 'Sampai Tanggal') : ''
+        if (startDate && endDate && startDate > endDate) {
+          throw createError({ statusCode: 400, message: 'Dari Tanggal tidak boleh lebih besar dari Sampai Tanggal.' })
+        }
+        if (startDate) args.push('--start-date', startDate)
+        if (endDate) args.push('--end-date', endDate)
+      } else {
+        if (!fields.startDate || !fields.endDate) {
+          throw createError({ statusCode: 400, message: 'Dari Tanggal dan Sampai Tanggal wajib diisi.' })
+        }
+        const startDate = validateIsoDate(fields.startDate, 'Dari Tanggal')
+        const endDate = validateIsoDate(fields.endDate, 'Sampai Tanggal')
+        if (startDate > endDate) {
+          throw createError({ statusCode: 400, message: 'Dari Tanggal tidak boleh lebih besar dari Sampai Tanggal.' })
+        }
+        args.push('--start-date', startDate, '--end-date', endDate)
       }
-      const startDate = validateIsoDate(fields.startDate, 'Dari Tanggal')
-      const endDate = validateIsoDate(fields.endDate, 'Sampai Tanggal')
-      if (startDate > endDate) {
-        throw createError({ statusCode: 400, message: 'Dari Tanggal tidak boleh lebih besar dari Sampai Tanggal.' })
-      }
-      args.push('--start-date', startDate, '--end-date', endDate)
     }
 
     const pythonBin = String(config.pythonBin || process.env.PYTHON_BIN || 'python3').trim() || 'python3'
