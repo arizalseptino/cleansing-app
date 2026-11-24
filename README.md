@@ -1,4 +1,4 @@
-# BersihData — Ruang Kerja Data Cleansing & ETL untuk ClickHouse
+# BersihData: Ruang Kerja Data Cleansing & ETL untuk ClickHouse
 
 **BersihData** (`cleansing-app`) adalah aplikasi web interaktif berbasis **Nuxt.js**, **ClickHouse**, dan **Python ETL** untuk membersihkan, menormalisasi, dan memvalidasi data tabel berskala ratusan ribu baris secara visual tanpa perlu menulis ulang kueri SQL secara manual.
 
@@ -20,19 +20,19 @@ Aplikasi ini bekerja secara **non-destruktif**: tabel sumber asli tidak pernah d
 Pastikan di komputer/server Anda sudah aktif:
 
 1. **ClickHouse Server** lokal maupun jaringan internal (port HTTP `8123`) dengan akun pengguna yang memiliki izin membuat database dan tabel (`CREATE DATABASE`, `CREATE TABLE`, `INSERT`, `RENAME TABLE`, `DROP TABLE`).
-2. **Docker Desktop** (Windows x64 / macOS Intel & Apple Silicon) jika menjalankan via Docker, **atau** **Node.js 20.x** (`node -v`) + **Python 3.10+** jika menjalankan mode development lokal.
+2. **Docker Desktop** (Windows x64 / macOS Intel & Apple Silicon) jika menjalankan melalui Docker, **atau** **Node.js 20.x** (`node -v`) + **Python 3.10+** jika menjalankan mode development lokal.
 
 ---
 
 ## Cara Menjalankan (Windows & MacBook)
 
-### Opsi A — Via Docker Compose (Rekomendasi Lintas OS)
+### Menggunakan Docker Compose (Rekomendasi Lintas OS)
 
 Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuzz`, `openpyxl`, `clickhouse-connect`, dll.) dalam satu container yang kompatibel dengan **Windows x64**, **macOS Intel**, maupun **MacBook Apple Silicon (M1/M2/M3/M4)**, serta otomatis terhubung ke ClickHouse lokal Anda.
 
 1. **Clone repositori & salin berkas `.env`:**
    ```bash
-   git clone [https://github.com/arizalseptino/cleansing-app.git](https://github.com/arizalseptino/cleansing-app.git)
+   git clone https://github.com/arizalseptino/cleansing-app.git
    cd cleansing-app
    cp .env.example .env
    ```
@@ -40,7 +40,7 @@ Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuz
 
 2. **Pastikan `CLICKHOUSE_URL` di `.env` mengarah ke host lokal dari dalam Docker:**
    ```env
-   CLICKHOUSE_URL=[http://host.docker.internal:8123](http://host.docker.internal:8123)
+   CLICKHOUSE_URL=http://host.docker.internal:8123
    CLICKHOUSE_USER=default
    CLICKHOUSE_PASSWORD=
    ```
@@ -61,11 +61,11 @@ Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuz
 
 ---
 
-### Opsi B — Via Development Lokal (`npm run dev`)
+### Menggunakan Development Lokal (`npm run dev`)
 
 1. **Clone repositori & pasang dependensi Node.js:**
    ```bash
-   git clone [https://github.com/arizalseptino/cleansing-app.git](https://github.com/arizalseptino/cleansing-app.git)
+   git clone https://github.com/arizalseptino/cleansing-app.git
    cd cleansing-app
    npm install
    ```
@@ -101,12 +101,12 @@ Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuz
 
 ## Panduan Singkat Mencoba Fitur (Walkthrough Uji Coba)
 
-### Langkah 1 — Siapkan Data Uji (Menu Sumber Data)
+### Langkah 1: Siapkan Data Uji (Menu Sumber Data)
 1. Buka menu **Sumber Data** di navigasi kiri.
 2. Anda bisa langsung memilih **Database** dan **Tabel** yang sudah ada di ClickHouse untuk melihat struktur kolom serta sampel isinya, atau
 3. **Unggah CSV Baru:** Pilih tab muat data dari berkas CSV (mendukung berkas besar secara *streaming*, teruji pada `>800.000` baris). Sistem akan otomatis mendeteksi tipe data setiap kolom (`Int64`, `Float64`, `Date`, `String`, `Nullable`) dan Anda dapat menyesuaikan tipe kolomnya sebelum tabel dibuat.
 
-### Langkah 2 — Susun & Pratinjau Cleansing (Menu Cleansing)
+### Langkah 2: Susun & Pratinjau Cleansing (Menu Cleansing)
 1. Buka menu **Cleansing**, lalu pilih **Database** dan **Tabel sumber** di panel atas (atau gunakan **Preset Cepat** di bawah bagian Resep).
 2. Pada panel kanan (**Buat Perubahan → Operasi**), tambahkan langkah pembersihan sesuai kebutuhan:
    * **Rapikan teks:** Menghapus spasi tepi/ganda, menyeragamkan kapitalisasi, dan mengubah teks kosong menjadi `NULL`.
@@ -120,12 +120,12 @@ Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuz
 3. Pantau hasilnya secara langsung di panel tengah (**Pratinjau**, menampilkan sampel 5.000 baris pertama agar responsif) serta periksa tab **SQL** jika ingin melihat kueri hasil kompilasi.
 4. Gunakan panel **Cek Sisa Anomali / Typo** untuk mengecek nilai dengan frekuensi terendah di keseluruhan tabel sumber guna mendeteksi sisa typo.
 
-### Langkah 3 — Simpan Tabel Baru & Cek Ringkasan Kualitas
+### Langkah 3: Simpan Tabel Baru & Cek Ringkasan Kualitas
 1. Klik tombol **Simpan sebagai tabel baru**, tentukan **Database tujuan** dan **Nama tabel hasil**, lalu mulai penyimpanan.
 2. Setelah selesai, aplikasi akan memverifikasi kelengkapan skema & jumlah baris secara otomatis, lalu menampilkan kartu **Ringkasan Kualitas Data (Sebelum vs. Sesudah)** yang membandingkan total baris serta jumlah nilai kosong (`NULL`/string kosong) di setiap kolom.
 3. Anda juga dapat mengklik **Ekspor Resep (JSON)** untuk menyimpan rangkaian langkah tersebut agar bisa dipakai ulang lewat **Impor Resep (JSON)** pada tabel lain.
 
-### Langkah 4 — Lihat Riwayat & Ekspor Hasil (Menu Riwayat & Sumber Data)
+### Langkah 4: Lihat Riwayat & Ekspor Hasil (Menu Riwayat & Sumber Data)
 * Buka menu **Riwayat** untuk melihat catatan setiap proses penyimpanan, mengklik tombol **Parameter** guna meninjau ulang daftar langkah dan kartu **Ringkasan Kualitas Data**, atau mengunduh tabel hasil dalam format **CSV / SQL**.
 
 ---
@@ -134,7 +134,7 @@ Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuz
 
 * **Status di pojok kanan atas `"Tidak terhubung"`:**
   * Pastikan layanan ClickHouse aktif dan port HTTP (`8123`) dapat diakses sesuai alamat `CLICKHOUSE_URL` di berkas `.env`.
-  * Jika menjalankan ClickHouse di dalam **WSL2** sementara aplikasi berjalan di **Docker Desktop**, pastikan konfigurasi ClickHouse menyertakan `<listen_host>0.0.0.0</listen_host>` dan `.env` menggunakan `CLICKHOUSE_URL=http://host.docker.internal:8123`.
+  * Jika menjalankan ClickHouse di dalam **WSL2** sementara aplikasi berjalan di **Docker Desktop**, pastikan konfigurasi ClickHouse menyertakan `<listen_host>0.0.0.0</listen_host>` dan `.env` menggunakan `CLICKHOUSE_URL=[http://host.docker.internal:8123](http://host.docker.internal:8123)`.
 * **Gagal saat membuat database/tabel hasil:**
   * Pastikan akun `CLICKHOUSE_USER` yang digunakan memiliki izin `CREATE`, `INSERT`, `RENAME`, dan `DROP` pada database tujuan.
 * **Performa lambat saat menyimpan ratusan ribu baris di Windows (WSL):**
