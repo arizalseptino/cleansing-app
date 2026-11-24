@@ -6,7 +6,8 @@ import path from 'node:path'
 import Busboy from 'busboy'
 import Papa from 'papaparse'
 import { recordCleansingHistory } from '../../features/cleansing-history'
-import { useClickHouse } from '../../utils/clickhouse'
+import { getClickHouseConnectionConfig, useClickHouse } from '../../utils/clickhouse'
+import { buildPythonSubprocessEnv, resolvePythonPath } from '../../utils/python'
 import { isSystemDatabase, quoteIdentifier } from '../../workbench/utils'
 
 type PipelineId = 'media_humas' | 'peserta_vpl' | 'anggaran_sp2d' | 'course_es'
@@ -225,12 +226,8 @@ function runPythonRunner(
     const child = spawn(pythonBin, [runnerPath, ...args], {
       cwd: process.cwd(),
       shell: false,
-      env: {
-        ...process.env,
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUTF8: '1',
-        ...envVars,
-      },
+      windowsHide: true,
+      env: buildPythonSubprocessEnv(envVars),
     })
 
     const stdoutChunks: Buffer[] = []
@@ -735,7 +732,8 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    const hasRealClickHouse = Boolean(config.clickhouseUrl && String(config.clickhouseUrl).trim())
+    const chConfig = getClickHouseConnectionConfig()
+    const hasRealClickHouse = Boolean(chConfig.url)
     const pythonAction: EtlAction = action === 'sync_db' && hasRealClickHouse ? 'sync_db' : 'preview'
 
     const args: string[] = ['--pipeline', pipeline, '--action', pythonAction]
@@ -841,12 +839,15 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    const pythonBin = String(config.pythonBin || process.env.PYTHON_BIN || 'python3').trim() || 'python3'
+    const pythonBin = resolvePythonPath(String(config.pythonBin || ''))
     const envVars: Record<string, string> = {
       ETL_TMP_DIR: getSafeTmpDir(),
-      NUXT_CLICKHOUSE_URL: String(config.clickhouseUrl || process.env.NUXT_CLICKHOUSE_URL || ''),
-      NUXT_CLICKHOUSE_USER: String(config.clickhouseUser || process.env.NUXT_CLICKHOUSE_USER || ''),
-      NUXT_CLICKHOUSE_PASSWORD: String(config.clickhousePassword || process.env.NUXT_CLICKHOUSE_PASSWORD || ''),
+      NUXT_CLICKHOUSE_URL: chConfig.url,
+      NUXT_CLICKHOUSE_USER: chConfig.user,
+      NUXT_CLICKHOUSE_PASSWORD: chConfig.password,
+      CLICKHOUSE_URL: chConfig.url,
+      CLICKHOUSE_USER: chConfig.user,
+      CLICKHOUSE_PASSWORD: chConfig.password,
       ELASTICSEARCH_URL: String(config.elasticsearchUrl || process.env.ELASTICSEARCH_URL || ''),
       ELASTICSEARCH_USER: String(config.elasticsearchUser || process.env.ELASTICSEARCH_USER || ''),
       ELASTICSEARCH_PASSWORD: String(config.elasticsearchPassword || process.env.ELASTICSEARCH_PASSWORD || ''),

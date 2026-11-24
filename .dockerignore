@@ -1,0 +1,34 @@
+# Dependencies & virtual environments
+node_modules
+python-etl/.venv
+.venv
+
+# Nuxt build & cache outputs
+.nuxt
+.output
+.nitro
+.data
+.cache
+dist
+
+# Python caches
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Git & local environment files
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Logs & temporary files
+logs
+*.log
+tmp
+*.tmp
+.DS_Store
+Thumbs.db

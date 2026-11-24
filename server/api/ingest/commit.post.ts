@@ -27,7 +27,7 @@ import {
   recordTempTableStatus,
   startTempTableHeartbeat,
 } from '../../features/temp-table-registry'
-import { buildClickHouseQuerySettings } from '../../utils/clickhouse'
+import { buildClickHouseQuerySettings, getClickHouseConnectionConfig } from '../../utils/clickhouse'
 
 function buildSafeTypedSelectExpr(colSql: string, colType: SupportedColumnType): string {
   if (colType === 'Nullable(String)') {
@@ -86,9 +86,9 @@ async function checkClickHouseAlive(
 
 export default defineEventHandler(async (event) => {
   const startedAt = Date.now()
-  const config = useRuntimeConfig()
+  const chConfig = getClickHouseConnectionConfig()
   const client = useClickHouse()
-  const hasRealClickHouse = Boolean(config.clickhouseUrl && config.clickhouseUrl.trim())
+  const hasRealClickHouse = Boolean(chConfig.url)
 
   let payload: IngestRequestPayload | null = null
   let mode: 'file' | 'text' = 'file'
@@ -266,9 +266,9 @@ export default defineEventHandler(async (event) => {
       currentStage = `kirim_batch_${batchIndex}`
       if (hasRealClickHouse) {
         await insertCsvBatchHttp({
-          clickhouseUrl: config.clickhouseUrl,
-          clickhouseUser: config.clickhouseUser,
-          clickhousePassword: config.clickhousePassword,
+          clickhouseUrl: chConfig.url,
+          clickhouseUser: chConfig.user,
+          clickhousePassword: chConfig.password,
           table: `${quotedDb}.${quotedStagingTable}`,
           columns: quotedColumns,
           batchBuffer: batchBuf,
@@ -293,9 +293,9 @@ export default defineEventHandler(async (event) => {
         if (hasRealClickHouse) {
           currentStage = 'kirim_csv_clickhouse_client'
           const insertedWithClient = await insertCsvFileWithClickHouseClient({
-            clickhouseUrl: config.clickhouseUrl,
-            clickhouseUser: config.clickhouseUser,
-            clickhousePassword: config.clickhousePassword,
+            clickhouseUrl: chConfig.url,
+            clickhouseUser: chConfig.user,
+            clickhousePassword: chConfig.password,
             filePath: payload.filePath,
             delimiter: inspection.delimiter,
             table: `${quotedDb}.${quotedStagingTable}`,
@@ -445,7 +445,7 @@ export default defineEventHandler(async (event) => {
 
     let livenessNote = ''
     if (isConnError) {
-      const health = await checkClickHouseAlive(client, config.clickhouseUrl)
+      const health = await checkClickHouseAlive(client, chConfig.url)
       livenessNote = health.note
     }
 

@@ -415,9 +415,9 @@ def fuzzy_extract_one(query: str, choices: Sequence[str]) -> Optional[Tuple[str,
 
 
 def get_clickhouse_config() -> Dict[str, Any]:
-    raw_url = (os.environ.get("NUXT_CLICKHOUSE_URL") or "").strip()
-    user = (os.environ.get("NUXT_CLICKHOUSE_USER") or "default").strip() or "default"
-    password = os.environ.get("NUXT_CLICKHOUSE_PASSWORD") or ""
+    raw_url = (os.environ.get("NUXT_CLICKHOUSE_URL") or os.environ.get("CLICKHOUSE_URL") or "").strip()
+    user = (os.environ.get("NUXT_CLICKHOUSE_USER") or os.environ.get("CLICKHOUSE_USER") or "default").strip() or "default"
+    password = os.environ.get("NUXT_CLICKHOUSE_PASSWORD") or os.environ.get("CLICKHOUSE_PASSWORD") or ""
     if not raw_url:
         return {"configured": False, "url": "", "host": "localhost", "port": 8123, "secure": False, "username": user, "password": password}
     parsed = urllib.parse.urlparse(raw_url if "://" in raw_url else f"http://{raw_url}")

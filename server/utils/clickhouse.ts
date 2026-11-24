@@ -57,16 +57,45 @@ export function buildClickHouseQuerySettings(
   }
 }
 
+export interface ClickHouseConnectionConfig {
+  url: string
+  user: string
+  password: string
+}
+
+export function getClickHouseConnectionConfig(): ClickHouseConnectionConfig {
+  const config = useRuntimeConfig()
+  const url = String(
+    config.clickhouseUrl
+      || process.env.NUXT_CLICKHOUSE_URL
+      || process.env.CLICKHOUSE_URL
+      || '',
+  ).trim()
+  const user = String(
+    config.clickhouseUser
+      || process.env.NUXT_CLICKHOUSE_USER
+      || process.env.CLICKHOUSE_USER
+      || 'default',
+  ).trim() || 'default'
+  const password = String(
+    config.clickhousePassword
+      || process.env.NUXT_CLICKHOUSE_PASSWORD
+      || process.env.CLICKHOUSE_PASSWORD
+      || '',
+  )
+  return { url, user, password }
+}
+
 let client: ClickHouseLikeClient | null = null
 
 export function useClickHouse(): ClickHouseLikeClient {
   if (!client) {
-    const config = useRuntimeConfig()
-    if (config.clickhouseUrl && config.clickhouseUrl.trim()) {
+    const chConfig = getClickHouseConnectionConfig()
+    if (chConfig.url) {
       client = createClient({
-        url: config.clickhouseUrl,
-        username: config.clickhouseUser,
-        password: config.clickhousePassword,
+        url: chConfig.url,
+        username: chConfig.user,
+        password: chConfig.password,
         request_timeout: 900_000,
         max_response_headers_size: 65536,
         keep_alive: {
@@ -78,7 +107,7 @@ export function useClickHouse(): ClickHouseLikeClient {
         },
       }) as unknown as ClickHouseLikeClient
     } else {
-      console.warn('[AI Studio] NUXT_CLICKHOUSE_URL is not configured — using in-memory ClickHouse simulation')
+      console.warn('[cleansing-app] CLICKHOUSE_URL / NUXT_CLICKHOUSE_URL is not configured — using in-memory ClickHouse simulation')
       client = useMockClickHouse()
     }
   }

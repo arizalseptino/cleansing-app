@@ -8,38 +8,85 @@ Aplikasi ini bekerja secara **non-destruktif**: tabel sumber asli tidak pernah d
 
 ## Prasyarat Sebelum Menjalankan
 
-Pastikan di komputer/server pengujian sudah terpasang dan berjalan:
-1. **Node.js** versi `18.x` atau `20.x` ke atas (`node -v`).
-2. **ClickHouse Server** aktif (lokal maupun jaringan internal) dengan akun pengguna yang memiliki izin membuat database dan tabel (`CREATE DATABASE`, `CREATE TABLE`, `INSERT`, `RENAME TABLE`, `DROP TABLE`).
+Pastikan di komputer/server Anda sudah aktif:
+1. **ClickHouse Server** lokal maupun jaringan internal (port HTTP `8123`) dengan akun pengguna yang memiliki izin membuat database dan tabel (`CREATE DATABASE`, `CREATE TABLE`, `INSERT`, `RENAME TABLE`, `DROP TABLE`).
+2. **Docker Desktop** (Windows x64 / macOS Intel & Apple Silicon) jika menjalankan via Docker, **atau** **Node.js** `20.x` (`node -v`) + **Python** `3.10+` jika menjalankan mode development lokal.
 
 ---
 
-## Cara Menjalankan (Quick Start)
+## Cara Menjalankan (Windows & MacBook)
 
-### 1. Clone Repositori & Pasang Dependensi
-```bash
-git clone [https://github.com/arizalseptino/cleansing-app.git](https://github.com/arizalseptino/cleansing-app.git)
-cd cleansing-app
-npm install
-```
+### Opsi A — Via Docker Compose (Rekomendasi Lintas OS)
 
-### 2. Atur Koneksi ClickHouse (`.env`)
-Buat berkas `.env` di folder utama proyek (atau salin dari `.env.example` jika tersedia), lalu isi sesuai konfigurasi ClickHouse lokal Anda:
+Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuzz`, `openpyxl`, `clickhouse-connect`, dll.) dalam satu container yang kompatibel dengan Windows x64, macOS Intel, maupun MacBook Apple Silicon (M1/M2/M3/M4), serta otomatis terhubung ke ClickHouse lokal Anda.
 
-```env
-CLICKHOUSE_URL=http://localhost:8123
-CLICKHOUSE_USER=default
-CLICKHOUSE_PASSWORD=
-CLICKHOUSE_DATABASE=default
-```
-*(Catatan: Jika nama variabel environment di `nuxt.config.ts` memakai prefiks `NUXT_`, sesuaikan dengan konfigurasi pada `nuxt.config.ts`.)*
+1. **Clone repositori & salin berkas `.env`:**
+   ```bash
+   git clone https://github.com/arizalseptino/cleansing-app.git
+   cd cleansing-app
+   cp .env.example .env
+   ```
+   *(Di Windows PowerShell dapat menggunakan `Copy-Item .env.example .env`.)*
 
-### 3. Jalankan Aplikasi
-```bash
-npm run dev
-```
-Buka peramban dan akses **`http://localhost:3000`**.  
-Periksa indikator status di **pojok kanan atas** layar: jika sudah berwarna hijau (**ClickHouse lokal · Terhubung** beserta versi servernya), aplikasi siap digunakan.
+2. **Pastikan `CLICKHOUSE_URL` di `.env` mengarah ke host lokal dari dalam Docker:**
+   ```env
+   CLICKHOUSE_URL=http://host.docker.internal:8123
+   CLICKHOUSE_USER=default
+   CLICKHOUSE_PASSWORD=
+   ```
+
+3. **Bangun dan jalankan container:**
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. **Buka aplikasi:**
+   Akses **`http://localhost:3000`** di peramban.  
+   Periksa indikator status di **pojok kanan atas** layar: jika sudah berwarna hijau (**Terhubung** beserta versi ClickHouse), aplikasi siap digunakan.
+
+5. **Memperbarui aplikasi setelah `git pull`:**
+   ```bash
+   git pull
+   docker compose up -d --build
+   ```
+
+---
+
+### Opsi B — Via Development Lokal (`npm run dev`)
+
+1. **Clone repositori & pasang dependensi Node.js:**
+   ```bash
+   git clone https://github.com/arizalseptino/cleansing-app.git
+   cd cleansing-app
+   npm install
+   ```
+
+2. **(Opsional untuk Pipeline Python ETL) Siapkan virtual environment Python:**
+   - **macOS / Linux:**
+     ```bash
+     python3 -m venv python-etl/.venv
+     python-etl/.venv/bin/pip install -r python-etl/requirements.txt
+     ```
+   - **Windows (PowerShell):**
+     ```powershell
+     python -m venv python-etl/.venv
+     python-etl\.venv\Scripts\python.exe -m pip install -r python-etl\requirements.txt
+     ```
+   *(Server Nuxt akan otomatis mendeteksi `python-etl/.venv` sesuai OS Anda, atau Anda dapat mengisi `PYTHON_PATH` di `.env`.)*
+
+3. **Atur `.env` untuk koneksi lokal:**
+   Salin `.env.example` menjadi `.env` dan gunakan `localhost`:
+   ```env
+   CLICKHOUSE_URL=http://localhost:8123
+   CLICKHOUSE_USER=default
+   CLICKHOUSE_PASSWORD=
+   ```
+
+4. **Jalankan server development:**
+   ```bash
+   npm run dev
+   ```
+   Buka **`http://localhost:3000`** di peramban.
 
 ---
 

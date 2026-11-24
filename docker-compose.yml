@@ -1,0 +1,20 @@
+services:
+  cleansing-app:
+    build: .
+    container_name: cleansing-app
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - CLICKHOUSE_URL=${CLICKHOUSE_URL:-http://host.docker.internal:8123}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - NUXT_CLICKHOUSE_URL=${NUXT_CLICKHOUSE_URL:-${CLICKHOUSE_URL:-http://host.docker.internal:8123}}
+      - NUXT_CLICKHOUSE_USER=${NUXT_CLICKHOUSE_USER:-${CLICKHOUSE_USER:-default}}
+      - NUXT_CLICKHOUSE_PASSWORD=${NUXT_CLICKHOUSE_PASSWORD:-${CLICKHOUSE_PASSWORD:-}}
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL:-}
+      - ELASTICSEARCH_USER=${ELASTICSEARCH_USER:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      - PYTHON_PATH=${PYTHON_PATH:-}
+    restart: unless-stopped
