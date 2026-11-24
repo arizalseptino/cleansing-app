@@ -24,11 +24,11 @@ Pastikan di komputer/server Anda sudah aktif:
 
 ---
 
-## Cara Menjalankan (Windows & MacBook)
+## Cara Menjalankan 
 
 ### Menggunakan Docker Compose (Rekomendasi Lintas OS)
 
-Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuzz`, `openpyxl`, `clickhouse-connect`, dll.) dalam satu container yang kompatibel dengan **Windows x64**, **macOS Intel**, maupun **MacBook Apple Silicon (M1/M2/M3/M4)**, serta otomatis terhubung ke ClickHouse lokal Anda.
+Cara ini menjalankan Nuxt 3 dan seluruh pipeline Python ETL (`pandas`, `rapidfuzz`, `openpyxl`, `clickhouse-connect`, dll.) dalam satu container yang kompatibel dengan **Windows x64**, **macOS Intel**, serta otomatis terhubung ke ClickHouse lokal Anda.
 
 1. **Clone repositori & salin berkas `.env`:**
    ```bash
