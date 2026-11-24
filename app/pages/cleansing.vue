@@ -140,8 +140,115 @@
               </div>
             </template>
 
-            <template v-else-if="etlPipeline === 'peserta_vpl' || etlPipeline === 'anggaran_sp2d'">
-              <div class="wb-etl-excel-wrap" :class="{ 'wb-etl-excel-with-date': etlPipeline === 'anggaran_sp2d' }">
+            <template v-else-if="etlPipeline === 'peserta_vpl'">
+              <div class="wb-etl-vpl-wrap">
+                <div class="wb-etl-vpl-grid">
+                  <div class="wb-source-field">
+                    <label>File Excel VPL 2025 (opsional jika hanya memproses 2026)</label>
+                    <div
+                      class="wb-dropzone wb-etl-dropzone"
+                      :class="{ 'wb-dropzone-active': etlDragActive2025 }"
+                      @dragover.prevent="etlDragActive2025 = true"
+                      @dragleave.prevent="etlDragActive2025 = false"
+                      @drop.prevent="handleEtlVplDrop('2025', $event)"
+                    >
+                      <template v-if="etlFile2025">
+                        <p>
+                          <strong>{{ etlFile2025.name }}</strong> ({{ formatFileSize(etlFile2025.size) }})
+                        </p>
+                        <div class="wb-etl-file-actions">
+                          <label class="wb-button wb-small wb-file-label">
+                            Ganti file 2025
+                            <input
+                              type="file"
+                              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                              :disabled="etlProcessing || etlSyncing"
+                              @change="handleEtlVplFileChange('2025', $event)"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            class="wb-button wb-small"
+                            :disabled="etlProcessing || etlSyncing"
+                            @click="clearEtlVplFile('2025')"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <p>Tarik dan lepas file <code>.xlsx</code> VPL 2025 ke sini, atau pilih file</p>
+                        <label class="wb-button wb-small wb-file-label">
+                          Pilih file VPL 2025 (.xlsx)
+                          <input
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            :disabled="etlProcessing || etlSyncing"
+                            @change="handleEtlVplFileChange('2025', $event)"
+                          />
+                        </label>
+                      </template>
+                    </div>
+                    <small class="wb-etl-hint">Contoh: <code>Data Peserta VPL Series ATA-X Ditekdijar.xlsx</code></small>
+                  </div>
+
+                  <div class="wb-source-field">
+                    <label>File Excel VPL 2026 (opsional jika hanya memproses 2025)</label>
+                    <div
+                      class="wb-dropzone wb-etl-dropzone"
+                      :class="{ 'wb-dropzone-active': etlDragActive2026 }"
+                      @dragover.prevent="etlDragActive2026 = true"
+                      @dragleave.prevent="etlDragActive2026 = false"
+                      @drop.prevent="handleEtlVplDrop('2026', $event)"
+                    >
+                      <template v-if="etlFile2026">
+                        <p>
+                          <strong>{{ etlFile2026.name }}</strong> ({{ formatFileSize(etlFile2026.size) }})
+                        </p>
+                        <div class="wb-etl-file-actions">
+                          <label class="wb-button wb-small wb-file-label">
+                            Ganti file 2026
+                            <input
+                              type="file"
+                              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                              :disabled="etlProcessing || etlSyncing"
+                              @change="handleEtlVplFileChange('2026', $event)"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            class="wb-button wb-small"
+                            :disabled="etlProcessing || etlSyncing"
+                            @click="clearEtlVplFile('2026')"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <p>Tarik dan lepas file <code>.xlsx</code> VPL 2026 ke sini, atau pilih file</p>
+                        <label class="wb-button wb-small wb-file-label">
+                          Pilih file VPL 2026 (.xlsx)
+                          <input
+                            type="file"
+                            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            :disabled="etlProcessing || etlSyncing"
+                            @change="handleEtlVplFileChange('2026', $event)"
+                          />
+                        </label>
+                      </template>
+                    </div>
+                    <small class="wb-etl-hint">Contoh: <code>Data VPL 2026 Seri 1 dan 2.xlsx</code></small>
+                  </div>
+                </div>
+                <small class="wb-etl-hint">
+                  Unggah minimal satu file (2025 atau 2026). Jika keduanya diunggah, data digabung berurutan (2025 lalu 2026) dengan kolom <code>id</code> berurutan tunggal <code>1..N</code>.
+                </small>
+              </div>
+            </template>
+
+            <template v-else-if="etlPipeline === 'anggaran_sp2d'">
+              <div class="wb-etl-excel-wrap wb-etl-excel-with-date">
                 <div class="wb-source-field">
                   <label>File Excel (.xlsx)</label>
                   <div
@@ -190,7 +297,7 @@
                   </div>
                 </div>
 
-                <div v-if="etlPipeline === 'anggaran_sp2d'" class="wb-source-field">
+                <div class="wb-source-field">
                   <label for="etl-sp2d-date">Tanggal Realisasi</label>
                   <input
                     id="etl-sp2d-date"
@@ -792,7 +899,7 @@
           <div class="wb-data-title-row">
             <h2 class="card-title">Hasil Pipeline {{ activeEtlMeta.label }}</h2>
             <span v-if="etlResult" class="wb-sample-badge">
-              {{ numberFormat(etlResult.total_rows) }} baris
+              {{ etlPreviewBadgeText }}
             </span>
           </div>
         </div>
@@ -1367,7 +1474,11 @@ const etlPipeline = ref<EtlPipelineId>('media_humas')
 const etlCourseEsSourceMode = ref<'api' | 'file'>('api')
 const etlRawText = ref('')
 const etlFile = ref<File | null>(null)
+const etlFile2025 = ref<File | null>(null)
+const etlFile2026 = ref<File | null>(null)
 const etlDragActive = ref(false)
+const etlDragActive2025 = ref(false)
+const etlDragActive2026 = ref(false)
 const etlStartDate = ref(todayIso)
 const etlEndDate = ref(todayIso)
 const etlFileStartDate = ref('')
@@ -1389,7 +1500,10 @@ const canRunEtl = computed(() => {
   if (etlPipeline.value === 'media_humas') {
     return Boolean(etlRawText.value.trim() || etlFile.value)
   }
-  if (etlPipeline.value === 'peserta_vpl' || etlPipeline.value === 'anggaran_sp2d') {
+  if (etlPipeline.value === 'peserta_vpl') {
+    return Boolean(etlFile2025.value || etlFile2026.value)
+  }
+  if (etlPipeline.value === 'anggaran_sp2d') {
     return Boolean(etlFile.value)
   }
   if (etlPipeline.value === 'course_es') {
@@ -1401,6 +1515,24 @@ const canRunEtl = computed(() => {
     return Boolean(etlStartDate.value && etlEndDate.value && etlStartDate.value <= etlEndDate.value)
   }
   return false
+})
+
+const etlPreviewBadgeText = computed(() => {
+  const result = etlResult.value
+  if (!result) return ''
+  if (result.pipeline === 'peserta_vpl') {
+    const tahunCounts = result.summary?.tahun_counts
+    if (tahunCounts && typeof tahunCounts === 'object') {
+      const entries = Object.entries(tahunCounts as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([yr, cnt]) => `${yr}: ${numberFormat(Number(cnt) || 0)} baris`)
+      if (entries.length > 0) {
+        entries.push(`Total: ${numberFormat(result.total_rows)} baris`)
+        return entries.join(' · ')
+      }
+    }
+  }
+  return `${numberFormat(result.total_rows)} baris`
 })
 
 const etlTotalPages = computed(() => {
@@ -1450,6 +1582,12 @@ const etlSummaryChips = computed(() => {
     chips.push({
       label: 'Referensi BKN',
       value: `${numberFormat(Number(s.master_instansi_count || 0))} instansi · ${numberFormat(Number(s.master_jf_count || 0))} JF`,
+    })
+  }
+  if (typeof s.overrides_instansi_hit === 'number' || typeof s.overrides_jabatan_hit === 'number') {
+    chips.push({
+      label: 'Koreksi Manual',
+      value: `${numberFormat(Number(s.overrides_instansi_hit || 0))} instansi · ${numberFormat(Number(s.overrides_jabatan_hit || 0))} jabatan`,
     })
   }
   return chips
@@ -2430,6 +2568,11 @@ function changeEtlPipeline(event: Event): void {
   const next = (event.target as HTMLSelectElement).value as EtlPipelineId
   etlPipeline.value = next
   etlFile.value = null
+  etlFile2025.value = null
+  etlFile2026.value = null
+  etlDragActive.value = false
+  etlDragActive2025.value = false
+  etlDragActive2026.value = false
   etlRawText.value = ''
   etlError.value = ''
   etlSyncMessage.value = ''
@@ -2450,6 +2593,35 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+function assignEtlVplFile(year: '2025' | '2026', file: File): void {
+  etlError.value = ''
+  if (!file.name.toLowerCase().endsWith('.xlsx')) {
+    etlError.value = `File VPL ${year} harus berformat Excel (.xlsx).`
+    return
+  }
+  if (year === '2025') etlFile2025.value = file
+  else etlFile2026.value = file
+}
+
+function handleEtlVplFileChange(year: '2025' | '2026', event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (file) assignEtlVplFile(year, file)
+}
+
+function handleEtlVplDrop(year: '2025' | '2026', event: DragEvent): void {
+  if (year === '2025') etlDragActive2025.value = false
+  else etlDragActive2026.value = false
+  const file = event.dataTransfer?.files?.[0]
+  if (file) assignEtlVplFile(year, file)
+}
+
+function clearEtlVplFile(year: '2025' | '2026'): void {
+  if (year === '2025') etlFile2025.value = null
+  else etlFile2026.value = null
 }
 
 function assignEtlFile(file: File): void {
@@ -2500,6 +2672,8 @@ function clearEtlFile(): void {
 
 function clearEtlInputs(): void {
   etlFile.value = null
+  etlFile2025.value = null
+  etlFile2026.value = null
   etlRawText.value = ''
   etlError.value = ''
 }
@@ -2555,7 +2729,10 @@ async function executeEtlRequest(
   const formData = new FormData()
   formData.append('pipeline', etlPipeline.value)
   formData.append('action', action)
-  if (etlFile.value) {
+  if (etlPipeline.value === 'peserta_vpl') {
+    if (etlFile2025.value) formData.append('file_2025', etlFile2025.value)
+    if (etlFile2026.value) formData.append('file_2026', etlFile2026.value)
+  } else if (etlFile.value) {
     formData.append('file', etlFile.value)
   }
   if (etlPipeline.value === 'course_es') {
@@ -4311,6 +4488,18 @@ onUnmounted(() => {
   gap: 12px;
 }
 
+.wb-etl-vpl-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.wb-etl-vpl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
 .wb-etl-excel-with-date {
   grid-template-columns: minmax(0, 1fr) 190px;
   align-items: start;
@@ -4439,6 +4628,10 @@ onUnmounted(() => {
 
   .wb-etl-submit-wrap {
     padding-top: 0;
+  }
+
+  .wb-etl-vpl-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

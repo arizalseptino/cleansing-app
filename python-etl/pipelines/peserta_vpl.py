@@ -39,7 +39,7 @@ COLS_SCHEMA = [
 ]
 
 OUTPUT_SCHEMA = [
-    {"name": "id", "type": "UInt64"},
+    {"name": "id", "type": "UInt32"},
     {"name": "series_vpl", "type": "Nullable(String)"},
     {"name": "nama_peserta", "type": "Nullable(String)"},
     {"name": "email", "type": "Nullable(String)"},
@@ -474,7 +474,59 @@ def _parse_webinar_ref_2025() -> Dict[str, Dict[str, Optional[str]]]:
     return out
 
 
-def _extract_workbook_records(excel_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+def _extract_2025_rows(
+    sheet_name: str,
+    rows: List[Dict[str, Any]],
+    ref_2025: Dict[str, Dict[str, Optional[str]]],
+) -> Tuple[List[Dict[str, Any]], str]:
+    extracted: List[Dict[str, Any]] = []
+    for r in rows:
+        series_val = None if is_missing(r.get("Series VPL yang diikuti")) else str(r.get("Series VPL yang diikuti")).strip()
+        ref_meta = ref_2025.get(series_val or "", {})
+        extracted.append({
+            "id": None,
+            "series_vpl": series_val,
+            "nama_peserta": None,
+            "email": None,
+            "jenis_kelamin": _clean_trailing_val(r.get("Jenis Kelamin")),
+            "jabatan_raw": _clean_trailing_val(r.get("Jabatan")),
+            "instansi_raw": _clean_trailing_val(r.get("Nama Instansi/Organisasi")),
+            "jenis_instansi": _clean_trailing_val(r.get("Jenis Instansi/Organisasi")),
+            "asal_daerah": _clean_trailing_val(r.get("Asal Daerah Instansi")),
+            "tanggal_webinar": ref_meta.get("tanggal_webinar"),
+            "judul_webinar": _clean_trailing_val(ref_meta.get("judul_webinar")),
+            "tahun_kegiatan": 2025,
+        })
+    return extracted, f"{sheet_name} (2025: {len(rows)} baris)"
+
+
+def _extract_2026_rows(
+    sheet_name: str,
+    rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], str]:
+    extracted: List[Dict[str, Any]] = []
+    for r in rows:
+        email = r.get("Email Address")
+        if is_missing(email) or str(email).strip() == "":
+            email = r.get("Email")
+        extracted.append({
+            "id": None,
+            "series_vpl": None if is_missing(r.get("VPL Series yang diikuti")) else str(r.get("VPL Series yang diikuti")).strip(),
+            "nama_peserta": _clean_trailing_val(r.get("Nama lengkap beserta gelar")),
+            "email": _clean_trailing_val(email),
+            "jenis_kelamin": _clean_trailing_val(r.get("Jenis Kelamin")),
+            "jabatan_raw": _clean_trailing_val(r.get("Jabatan")),
+            "instansi_raw": _clean_trailing_val(r.get("Nama Instansi")),
+            "jenis_instansi": _clean_trailing_val(r.get("Jenis Instansi/Organisasi")),
+            "asal_daerah": _clean_trailing_val(r.get("Asal Daerah Provinsi")),
+            "tanggal_webinar": None,
+            "judul_webinar": None,
+            "tahun_kegiatan": 2026,
+        })
+    return extracted, f"{sheet_name} (2026: {len(rows)} baris)"
+
+
+def extract_transform_2025(excel_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
     sheets = read_excel_sheets(excel_path, sheet_names=None, header=0)
     ref_2025 = _parse_webinar_ref_2025()
     records: List[Dict[str, Any]] = []
@@ -483,53 +535,66 @@ def _extract_workbook_records(excel_path: str) -> Tuple[List[Dict[str, Any]], Li
     for sheet_name, sheet_data in sheets.items():
         cols = sheet_data.get("columns", [])
         rows = sheet_data.get("rows", [])
+        if "Series VPL yang diikuti" in set(cols):
+            part_rows, note = _extract_2025_rows(sheet_name, rows, ref_2025)
+            records.extend(part_rows)
+            sheet_notes.append(note)
+
+    if not sheet_notes:
+        raise ValueError(
+            "File Excel VPL 2025 tidak memiliki kolom standar 'Series VPL yang diikuti'."
+        )
+    return records, sheet_notes
+
+
+def extract_transform_2026(excel_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    sheets = read_excel_sheets(excel_path, sheet_names=None, header=0)
+    records: List[Dict[str, Any]] = []
+    sheet_notes: List[str] = []
+
+    for sheet_name, sheet_data in sheets.items():
+        cols = sheet_data.get("columns", [])
+        rows = sheet_data.get("rows", [])
+        if "VPL Series yang diikuti" in set(cols):
+            part_rows, note = _extract_2026_rows(sheet_name, rows)
+            records.extend(part_rows)
+            sheet_notes.append(note)
+
+    if not sheet_notes:
+        raise ValueError(
+            "File Excel VPL 2026 tidak memiliki kolom standar 'VPL Series yang diikuti'."
+        )
+    return records, sheet_notes
+
+
+def _extract_workbook_records(excel_path: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    sheets = read_excel_sheets(excel_path, sheet_names=None, header=0)
+    ref_2025 = _parse_webinar_ref_2025()
+    records_2025: List[Dict[str, Any]] = []
+    notes_2025: List[str] = []
+    records_2026: List[Dict[str, Any]] = []
+    notes_2026: List[str] = []
+
+    for sheet_name, sheet_data in sheets.items():
+        cols = sheet_data.get("columns", [])
+        rows = sheet_data.get("rows", [])
         col_set = set(cols)
 
-        if "VPL Series yang diikuti" in col_set:
-            sheet_notes.append(f"{sheet_name} (format 2026: {len(rows)} baris)")
-            for r in rows:
-                email = r.get("Email Address")
-                if is_missing(email) or str(email).strip() == "":
-                    email = r.get("Email")
-                records.append({
-                    "id": None,
-                    "series_vpl": None if is_missing(r.get("VPL Series yang diikuti")) else str(r.get("VPL Series yang diikuti")).strip(),
-                    "nama_peserta": _clean_trailing_val(r.get("Nama lengkap beserta gelar")),
-                    "email": _clean_trailing_val(email),
-                    "jenis_kelamin": _clean_trailing_val(r.get("Jenis Kelamin")),
-                    "jabatan_raw": _clean_trailing_val(r.get("Jabatan")),
-                    "instansi_raw": _clean_trailing_val(r.get("Nama Instansi")),
-                    "jenis_instansi": _clean_trailing_val(r.get("Jenis Instansi/Organisasi")),
-                    "asal_daerah": _clean_trailing_val(r.get("Asal Daerah Provinsi")),
-                    "tanggal_webinar": None,
-                    "judul_webinar": None,
-                    "tahun_kegiatan": 2026,
-                })
-        elif "Series VPL yang diikuti" in col_set:
-            sheet_notes.append(f"{sheet_name} (format 2025: {len(rows)} baris)")
-            for r in rows:
-                series_val = None if is_missing(r.get("Series VPL yang diikuti")) else str(r.get("Series VPL yang diikuti")).strip()
-                ref_meta = ref_2025.get(series_val or "", {})
-                records.append({
-                    "id": None,
-                    "series_vpl": series_val,
-                    "nama_peserta": None,
-                    "email": None,
-                    "jenis_kelamin": _clean_trailing_val(r.get("Jenis Kelamin")),
-                    "jabatan_raw": _clean_trailing_val(r.get("Jabatan")),
-                    "instansi_raw": _clean_trailing_val(r.get("Nama Instansi/Organisasi")),
-                    "jenis_instansi": _clean_trailing_val(r.get("Jenis Instansi/Organisasi")),
-                    "asal_daerah": _clean_trailing_val(r.get("Asal Daerah Instansi")),
-                    "tanggal_webinar": ref_meta.get("tanggal_webinar"),
-                    "judul_webinar": _clean_trailing_val(ref_meta.get("judul_webinar")),
-                    "tahun_kegiatan": 2025,
-                })
+        if "Series VPL yang diikuti" in col_set:
+            part_rows, note = _extract_2025_rows(sheet_name, rows, ref_2025)
+            records_2025.extend(part_rows)
+            notes_2025.append(note)
+        elif "VPL Series yang diikuti" in col_set:
+            part_rows, note = _extract_2026_rows(sheet_name, rows)
+            records_2026.extend(part_rows)
+            notes_2026.append(note)
 
+    sheet_notes = notes_2025 + notes_2026
     if not sheet_notes:
         raise ValueError(
             "Kolom standar VPL ('VPL Series yang diikuti' atau 'Series VPL yang diikuti') tidak ditemukan pada sheet Excel."
         )
-    return records, sheet_notes
+    return records_2025 + records_2026, sheet_notes
 
 
 def _parse_date_val(val: Any) -> Optional[dt.date]:
@@ -552,10 +617,16 @@ def _parse_date_val(val: Any) -> Optional[dt.date]:
 
 def _ensure_table(client: ClickHouseClientWrapper) -> None:
     client.command("CREATE DATABASE IF NOT EXISTS db_vpl")
+    existing_cols = client.query_rows(
+        "SELECT type FROM system.columns "
+        "WHERE database = 'db_vpl' AND table = 'vpl_series_atax' AND name = 'id' LIMIT 1"
+    )
+    if existing_cols and existing_cols[0] and str(existing_cols[0][0]).strip() != "UInt32":
+        client.command(f"DROP TABLE IF EXISTS {TABLE_NAME}")
     client.command(
         f"""
         CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
-            id UInt64,
+            id UInt32,
             series_vpl Nullable(String),
             nama_peserta Nullable(String),
             email Nullable(String),
@@ -578,14 +649,25 @@ def _ensure_table(client: ClickHouseClientWrapper) -> None:
 def run(
     action: str = "preview",
     input_path: Optional[str] = None,
+    input_2025: Optional[str] = None,
+    input_2026: Optional[str] = None,
     target_db: Optional[str] = None,
     target_table: Optional[str] = None,
     engine: Optional[str] = None,
     order_by: Optional[str] = None,
     **_: Any,
 ) -> Dict[str, Any]:
-    if not input_path or not os.path.exists(input_path):
-        raise ValueError("File Excel (.xlsx) Peserta VPL wajib diunggah.")
+    path_2025 = (input_2025 or "").strip() or None
+    path_2026 = (input_2026 or "").strip() or None
+    path_legacy = (input_path or "").strip() or None
+
+    if path_2025 and not os.path.exists(path_2025):
+        raise ValueError("File Excel VPL 2025 tidak ditemukan di server.")
+    if path_2026 and not os.path.exists(path_2026):
+        raise ValueError("File Excel VPL 2026 tidak ditemukan di server.")
+    if not path_2025 and not path_2026:
+        if not path_legacy or not os.path.exists(path_legacy):
+            raise ValueError("Minimal satu file Excel (.xlsx) Peserta VPL 2025 atau 2026 wajib diunggah.")
 
     custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, OUTPUT_SCHEMA)
     effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
@@ -594,9 +676,23 @@ def run(
     ov_inst = load_manual_overrides(REFERENCES_DIR / "manual_override_instansi.csv")
     ov_jab = load_manual_overrides(REFERENCES_DIR / "manual_override_jabatan.csv")
 
-    records, sheet_notes = _extract_workbook_records(input_path)
+    if path_2025 or path_2026:
+        records_2025: List[Dict[str, Any]] = []
+        notes_2025: List[str] = []
+        records_2026: List[Dict[str, Any]] = []
+        notes_2026: List[str] = []
+        if path_2025:
+            records_2025, notes_2025 = extract_transform_2025(path_2025)
+        if path_2026:
+            records_2026, notes_2026 = extract_transform_2026(path_2026)
+        records = records_2025 + records_2026
+        sheet_notes = notes_2025 + notes_2026
+    else:
+        assert path_legacy is not None
+        records, sheet_notes = _extract_workbook_records(path_legacy)
+
     for idx, rec in enumerate(records, start=1):
-        rec["id"] = idx
+        rec["id"] = int(idx)
 
     unique_jabatan = sorted({str(r["jabatan_raw"]) for r in records if r.get("jabatan_raw")})
     unique_instansi = sorted({str(r["instansi_raw"]) for r in records if r.get("instansi_raw")})
@@ -697,6 +793,8 @@ def run(
         "csv_filename": csv_filename,
         "summary": {
             "total_rows": len(serialized),
+            "rows_2025": tahun_counts.get("2025", 0),
+            "rows_2026": tahun_counts.get("2026", 0),
             "sheets": sheet_notes,
             "tahun_counts": tahun_counts,
             "master_instansi_count": len(instansi_ref),

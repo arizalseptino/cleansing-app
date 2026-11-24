@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pipeline", required=True, choices=sorted(PIPELINES.keys()))
     parser.add_argument("--action", default="preview", choices=["preview", "sync_db"])
     parser.add_argument("--input-path", default="")
+    parser.add_argument("--input-2025", default="")
+    parser.add_argument("--input-2026", default="")
     parser.add_argument("--raw-text", default="")
     parser.add_argument("--raw-text-file", default="")
     parser.add_argument("--start-date", default="")
@@ -44,6 +46,8 @@ def main() -> int:
     params: Dict[str, Any] = {
         "action": args.action,
         "input_path": args.input_path or None,
+        "input_2025": args.input_2025 or None,
+        "input_2026": args.input_2026 or None,
         "raw_text": args.raw_text or None,
         "start_date": args.start_date or None,
         "end_date": args.end_date or None,

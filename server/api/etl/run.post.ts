@@ -97,8 +97,14 @@ function validateIsoDate(value: string, label: string): string {
   return trimmed
 }
 
+interface UploadedFileInfo {
+  filePath: string
+  originalName: string
+}
+
 function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] extends (e: infer E) => unknown ? E : never): Promise<{
   fields: Record<string, string>
+  filesByField: Record<string, UploadedFileInfo>
   uploadedFilePath: string | null
   uploadedOriginalName: string | null
 }> {
@@ -106,16 +112,18 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
     const req = event.node.req
     const headers = req.headers
     const fields: Record<string, string> = {}
-    let uploadedFilePath: string | null = null
-    let uploadedOriginalName: string | null = null
+    const filesByField: Record<string, UploadedFileInfo> = {}
+    const createdTempFiles: string[] = []
     let fileLimitExceeded = false
-    let fileWritePromise: Promise<void> | null = null
+    const fileWritePromises: Promise<void>[] = []
     let settled = false
 
     const fail = (err: Error) => {
       if (settled) return
       settled = true
-      cleanupFileQuietly(uploadedFilePath)
+      for (const fp of createdTempFiles) {
+        cleanupFileQuietly(fp)
+      }
       reject(err)
     }
 
@@ -124,7 +132,7 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
       busboy = Busboy({
         headers,
         limits: {
-          files: 1,
+          files: 5,
           fileSize: MAX_UPLOAD_BYTES,
           fields: 20,
           fieldSize: MAX_RAW_TEXT_BYTES,
@@ -139,7 +147,7 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
       fields[name] = value
     })
 
-    busboy.on('file', (_fieldname, stream, info) => {
+    busboy.on('file', (fieldname, stream, info) => {
       const originalName = info?.filename || 'upload.bin'
       const ext = path.extname(originalName).toLowerCase()
       if (!['.xlsx', '.txt', '.csv', '.json'].includes(ext)) {
@@ -147,9 +155,12 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
         fail(createError({ statusCode: 400, message: `Ekstensi file tidak diizinkan (${ext || 'kosong'}). Gunakan .xlsx, .txt, .json, atau .csv.` }))
         return
       }
-      uploadedOriginalName = originalName
       const destPath = makeTempFilePath('etl_upload', ext)
-      uploadedFilePath = destPath
+      createdTempFiles.push(destPath)
+      if (filesByField[fieldname]) {
+        cleanupFileQuietly(filesByField[fieldname].filePath)
+      }
+      filesByField[fieldname] = { filePath: destPath, originalName }
       const writeStream = fs.createWriteStream(destPath)
 
       stream.on('limit', () => {
@@ -158,11 +169,12 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
         stream.resume()
       })
 
-      fileWritePromise = new Promise<void>((resWrite, rejWrite) => {
+      const writePromise = new Promise<void>((resWrite, rejWrite) => {
         writeStream.on('finish', () => resWrite())
         writeStream.on('error', (err) => rejWrite(err))
         stream.on('error', (err) => rejWrite(err))
       })
+      fileWritePromises.push(writePromise)
 
       stream.pipe(writeStream)
     })
@@ -174,15 +186,21 @@ function readMultipartRequest(event: Parameters<typeof defineEventHandler>[0] ex
     busboy.on('finish', async () => {
       if (settled) return
       try {
-        if (fileWritePromise) {
-          await fileWritePromise
+        if (fileWritePromises.length > 0) {
+          await Promise.all(fileWritePromises)
         }
         if (fileLimitExceeded) {
           fail(createError({ statusCode: 413, message: 'Ukuran file melebihi batas maksimal 50 MB.' }))
           return
         }
         settled = true
-        resolve({ fields, uploadedFilePath, uploadedOriginalName })
+        const primaryFile = filesByField.file ?? Object.values(filesByField)[0] ?? null
+        resolve({
+          fields,
+          filesByField,
+          uploadedFilePath: primaryFile?.filePath ?? null,
+          uploadedOriginalName: primaryFile?.originalName ?? null,
+        })
       } catch (err) {
         fail(createError({ statusCode: 400, message: err instanceof Error ? err.message : 'Gagal menyimpan file upload.' }))
       }
@@ -384,7 +402,7 @@ async function syncRowsToMockClickHouse(
       const next: Record<string, unknown> = {}
       for (const col of schema) {
         let val = row[col.name]
-        if (col.name === 'id' && pipeline === 'anggaran_sp2d') {
+        if (col.name === 'id' && (pipeline === 'anggaran_sp2d' || pipeline === 'peserta_vpl')) {
           val = idx + 1
         } else if (col.name === 'ID' && pipeline === 'media_humas') {
           val = idx + 1
@@ -517,7 +535,7 @@ async function syncRowsToMockClickHouse(
     await client.command({
       query: `
         CREATE TABLE IF NOT EXISTS db_vpl.vpl_series_atax (
-          id UInt64,
+          id UInt32,
           series_vpl Nullable(String),
           nama_peserta Nullable(String),
           email Nullable(String),
@@ -665,13 +683,17 @@ export default defineEventHandler(async (event) => {
   try {
     const contentType = String(getHeader(event, 'content-type') || '').toLowerCase()
     let fields: Record<string, string> = {}
+    let filesByField: Record<string, UploadedFileInfo> = {}
     let uploadedFilePath: string | null = null
 
     if (contentType.includes('multipart/form-data')) {
       const parsed = await readMultipartRequest(event)
       fields = parsed.fields
+      filesByField = parsed.filesByField
       uploadedFilePath = parsed.uploadedFilePath
-      if (uploadedFilePath) tempFiles.push(uploadedFilePath)
+      for (const fileInfo of Object.values(filesByField)) {
+        if (fileInfo?.filePath) tempFiles.push(fileInfo.filePath)
+      }
     } else {
       const body = await readBody<Record<string, unknown>>(event).catch(() => null)
       if (!body || typeof body !== 'object') {
@@ -747,7 +769,33 @@ export default defineEventHandler(async (event) => {
       } else {
         throw createError({ statusCode: 400, message: 'Masukkan teks rekap broadcast WA atau unggah file .txt.' })
       }
-    } else if (pipeline === 'peserta_vpl' || pipeline === 'anggaran_sp2d') {
+    } else if (pipeline === 'peserta_vpl') {
+      const file2025 = filesByField.file_2025 ?? null
+      const file2026 = filesByField.file_2026 ?? null
+      const legacyFile = filesByField.file ?? (uploadedFilePath ? { filePath: uploadedFilePath, originalName: 'upload.xlsx' } : null)
+
+      if (file2025 || file2026) {
+        if (file2025) {
+          if (path.extname(file2025.filePath).toLowerCase() !== '.xlsx') {
+            throw createError({ statusCode: 400, message: 'File VPL 2025 harus berformat Excel (.xlsx).' })
+          }
+          args.push('--input-2025', file2025.filePath)
+        }
+        if (file2026) {
+          if (path.extname(file2026.filePath).toLowerCase() !== '.xlsx') {
+            throw createError({ statusCode: 400, message: 'File VPL 2026 harus berformat Excel (.xlsx).' })
+          }
+          args.push('--input-2026', file2026.filePath)
+        }
+      } else if (legacyFile) {
+        if (path.extname(legacyFile.filePath).toLowerCase() !== '.xlsx') {
+          throw createError({ statusCode: 400, message: 'Pipeline ini hanya menerima file Excel (.xlsx).' })
+        }
+        args.push('--input-path', legacyFile.filePath)
+      } else {
+        throw createError({ statusCode: 400, message: 'Unggah minimal satu file Excel (.xlsx) VPL 2025 atau VPL 2026 terlebih dahulu.' })
+      }
+    } else if (pipeline === 'anggaran_sp2d') {
       if (!uploadedFilePath) {
         throw createError({ statusCode: 400, message: 'Unggah file Excel (.xlsx) terlebih dahulu.' })
       }
@@ -755,7 +803,7 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, message: 'Pipeline ini hanya menerima file Excel (.xlsx).' })
       }
       args.push('--input-path', uploadedFilePath)
-      if (pipeline === 'anggaran_sp2d' && fields.tanggalRealisasi && fields.tanggalRealisasi.trim()) {
+      if (fields.tanggalRealisasi && fields.tanggalRealisasi.trim()) {
         const tgl = validateIsoDate(fields.tanggalRealisasi, 'Tanggal realisasi')
         args.push('--tanggal-realisasi', tgl)
       }
