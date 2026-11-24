@@ -770,22 +770,22 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, message: 'Masukkan teks rekap broadcast WA atau unggah file .txt.' })
       }
     } else if (pipeline === 'peserta_vpl') {
-      const file2025 = filesByField.file_2025 ?? null
-      const file2026 = filesByField.file_2026 ?? null
+      const filePrimary = filesByField.file_utama ?? filesByField.file_2025 ?? null
+      const fileSecondary = filesByField.file_tambahan ?? filesByField.file_2026 ?? null
       const legacyFile = filesByField.file ?? (uploadedFilePath ? { filePath: uploadedFilePath, originalName: 'upload.xlsx' } : null)
 
-      if (file2025 || file2026) {
-        if (file2025) {
-          if (path.extname(file2025.filePath).toLowerCase() !== '.xlsx') {
-            throw createError({ statusCode: 400, message: 'File VPL 2025 harus berformat Excel (.xlsx).' })
+      if (filePrimary || fileSecondary) {
+        if (filePrimary) {
+          if (path.extname(filePrimary.filePath).toLowerCase() !== '.xlsx') {
+            throw createError({ statusCode: 400, message: 'Berkas Excel Peserta VPL (Utama) harus berformat Excel (.xlsx).' })
           }
-          args.push('--input-2025', file2025.filePath)
+          args.push('--input-2025', filePrimary.filePath)
         }
-        if (file2026) {
-          if (path.extname(file2026.filePath).toLowerCase() !== '.xlsx') {
-            throw createError({ statusCode: 400, message: 'File VPL 2026 harus berformat Excel (.xlsx).' })
+        if (fileSecondary) {
+          if (path.extname(fileSecondary.filePath).toLowerCase() !== '.xlsx') {
+            throw createError({ statusCode: 400, message: 'Berkas Excel Tambahan harus berformat Excel (.xlsx).' })
           }
-          args.push('--input-2026', file2026.filePath)
+          args.push('--input-2026', fileSecondary.filePath)
         }
       } else if (legacyFile) {
         if (path.extname(legacyFile.filePath).toLowerCase() !== '.xlsx') {
@@ -793,7 +793,7 @@ export default defineEventHandler(async (event) => {
         }
         args.push('--input-path', legacyFile.filePath)
       } else {
-        throw createError({ statusCode: 400, message: 'Unggah minimal satu file Excel (.xlsx) VPL 2025 atau VPL 2026 terlebih dahulu.' })
+        throw createError({ statusCode: 400, message: 'Unggah minimal satu berkas Excel (.xlsx) Peserta VPL terlebih dahulu.' })
       }
     } else if (pipeline === 'anggaran_sp2d') {
       if (!uploadedFilePath) {

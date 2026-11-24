@@ -662,12 +662,12 @@ def run(
     path_legacy = (input_path or "").strip() or None
 
     if path_2025 and not os.path.exists(path_2025):
-        raise ValueError("File Excel VPL 2025 tidak ditemukan di server.")
+        raise ValueError("Berkas Excel Peserta VPL (Utama) tidak ditemukan di server.")
     if path_2026 and not os.path.exists(path_2026):
-        raise ValueError("File Excel VPL 2026 tidak ditemukan di server.")
+        raise ValueError("Berkas Excel Tambahan tidak ditemukan di server.")
     if not path_2025 and not path_2026:
         if not path_legacy or not os.path.exists(path_legacy):
-            raise ValueError("Minimal satu file Excel (.xlsx) Peserta VPL 2025 atau 2026 wajib diunggah.")
+            raise ValueError("Minimal satu file Excel (.xlsx) Peserta VPL wajib diunggah.")
 
     custom_target = validate_custom_target_params(target_db, target_table, engine, order_by, OUTPUT_SCHEMA)
     effective_target = f"{custom_target[0]}.{custom_target[1]}" if custom_target else TABLE_NAME
@@ -676,20 +676,26 @@ def run(
     ov_inst = load_manual_overrides(REFERENCES_DIR / "manual_override_instansi.csv")
     ov_jab = load_manual_overrides(REFERENCES_DIR / "manual_override_jabatan.csv")
 
+    rows_primary: Optional[int] = None
+    rows_secondary: Optional[int] = None
+
     if path_2025 or path_2026:
-        records_2025: List[Dict[str, Any]] = []
-        notes_2025: List[str] = []
-        records_2026: List[Dict[str, Any]] = []
-        notes_2026: List[str] = []
+        records_primary: List[Dict[str, Any]] = []
+        notes_primary: List[str] = []
+        records_secondary: List[Dict[str, Any]] = []
+        notes_secondary: List[str] = []
         if path_2025:
-            records_2025, notes_2025 = extract_transform_2025(path_2025)
+            records_primary, notes_primary = _extract_workbook_records(path_2025)
+            rows_primary = len(records_primary)
         if path_2026:
-            records_2026, notes_2026 = extract_transform_2026(path_2026)
-        records = records_2025 + records_2026
-        sheet_notes = notes_2025 + notes_2026
+            records_secondary, notes_secondary = _extract_workbook_records(path_2026)
+            rows_secondary = len(records_secondary)
+        records = records_primary + records_secondary
+        sheet_notes = notes_primary + notes_secondary
     else:
         assert path_legacy is not None
         records, sheet_notes = _extract_workbook_records(path_legacy)
+        rows_primary = len(records)
 
     for idx, rec in enumerate(records, start=1):
         rec["id"] = int(idx)
@@ -793,6 +799,8 @@ def run(
         "csv_filename": csv_filename,
         "summary": {
             "total_rows": len(serialized),
+            "rows_primary": rows_primary,
+            "rows_secondary": rows_secondary,
             "rows_2025": tahun_counts.get("2025", 0),
             "rows_2026": tahun_counts.get("2026", 0),
             "sheets": sheet_notes,
