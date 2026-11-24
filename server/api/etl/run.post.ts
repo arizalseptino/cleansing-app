@@ -50,7 +50,7 @@ const VALID_PIPELINES = new Set<PipelineId>([
 const VALID_ACTIONS = new Set<EtlAction>(['preview', 'sync_db'])
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const MAX_RAW_TEXT_BYTES = 10 * 1024 * 1024
-const PYTHON_TIMEOUT_MS = 120_000
+const PYTHON_TIMEOUT_MS = 600_000
 
 const PIPELINE_TARGET_TABLES: Record<PipelineId, string> = {
   media_humas: 'dataset.publikasi_media',
@@ -209,6 +209,8 @@ function runPythonRunner(
       shell: false,
       env: {
         ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
         ...envVars,
       },
     })
@@ -233,7 +235,7 @@ function runPythonRunner(
     child.on('close', (code) => {
       clearTimeout(timer)
       if (timedOut) {
-        reject(createError({ statusCode: 504, message: 'Proses pipeline Python melebihi batas waktu (120 detik).' }))
+        reject(createError({ statusCode: 504, message: 'Proses pipeline Python melebihi batas waktu (600 detik / 10 menit).' }))
         return
       }
       resolve({
@@ -649,6 +651,10 @@ async function syncRowsToMockClickHouse(
 }
 
 export default defineEventHandler(async (event) => {
+  // Prevent Node's default server requestTimeout (5 min) from terminating long-running ETL processes
+  event.node?.req?.setTimeout?.(0)
+  event.node?.res?.setTimeout?.(0)
+
   const startedAt = Date.now()
   const config = useRuntimeConfig()
   const tempFiles: string[] = []
