@@ -550,11 +550,14 @@
         <div v-if="importSummary" class="wb-import-summary" role="status">
           <p>
             <strong>Cleansing template "{{ importSummary.name }}":</strong>
-            {{ importSummary.valid }} langkah valid, {{ importSummary.invalid }} langkah bermasalah.
+            {{ importSummary.valid }} langkah valid<template v-if="importSummary.invalid > 0">, {{ importSummary.invalid }} langkah bermasalah</template><template v-if="importSummary.skipped">, {{ importSummary.skipped }} langkah dilewati</template>.
           </p>
           <p v-if="importSummary.suggestedSourceNote" class="wb-import-note">
             {{ importSummary.suggestedSourceNote }}
           </p>
+          <ul v-if="importSummary.skippedDetails?.length" class="wb-import-warnings">
+            <li v-for="(detail, detailIdx) in importSummary.skippedDetails" :key="detailIdx">{{ detail }}</li>
+          </ul>
           <div class="wb-import-summary-actions">
             <button
               v-if="missingColumnReferences.length > 0"
@@ -589,6 +592,24 @@
           <button class="wb-button wb-small" type="button" @click="openImportDialog">
             Impor cleansing template
           </button>
+        </div>
+
+        <div class="wb-quick-presets" aria-label="Preset Cepat">
+          <span class="wb-quick-presets-label">Preset Cepat:</span>
+          <div class="wb-quick-presets-row">
+            <button
+              v-for="preset in quickPresets"
+              :key="preset.id"
+              type="button"
+              class="wb-preset-chip"
+              :class="{ 'wb-preset-chip-active': activeQuickPresetId === preset.id }"
+              :aria-pressed="activeQuickPresetId === preset.id"
+              :disabled="importingTemplate"
+              @click="applyQuickPreset(preset.id)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1287,6 +1308,12 @@
 <script setup lang="ts">
 import type { QualitySummaryData } from '~/components/QualitySummaryCard.vue'
 import type { WorkbenchPreviewResponse, WorkbenchStep } from '~/composables/useWorkbench'
+import {
+  QUICK_PRESETS,
+  filterCompatiblePresetSteps,
+  type QuickPresetId,
+  type RecipeTemplatePayload,
+} from '~/utils/cleansingPresets'
 
 type Database = { name: string }
 type Table = { name: string; engine?: string }
@@ -1434,7 +1461,16 @@ const showImportDialog = ref(false)
 const importDragActive = ref(false)
 const importingTemplate = ref(false)
 const importError = ref('')
-const importSummary = ref<{ name: string; valid: number; invalid: number; suggestedSourceNote: string } | null>(null)
+const importSummary = ref<{
+  name: string
+  valid: number
+  invalid: number
+  skipped?: number
+  skippedDetails?: string[]
+  suggestedSourceNote: string
+} | null>(null)
+const quickPresets = QUICK_PRESETS
+const activeQuickPresetId = ref<QuickPresetId | ''>('')
 const showMappingDialog = ref(false)
 const columnMappingDraft = reactive<Record<string, string>>({})
 const sampleInfoRef = ref<HTMLElement | null>(null)
@@ -1976,6 +2012,7 @@ function changeDatabase(event: Event): void {
   rareError.value = ''
   selectedRareKeys.value = []
   importSummary.value = null
+  activeQuickPresetId.value = ''
   if (database) void loadTables(database)
 }
 
@@ -1988,6 +2025,7 @@ function changeTable(event: Event): void {
   rareError.value = ''
   selectedRareKeys.value = []
   importSummary.value = null
+  activeQuickPresetId.value = ''
   void loadSourceColumns(pipeline.value.source.database, table)
 }
 
@@ -2072,6 +2110,7 @@ function commitForm(params: Record<string, unknown>): void {
     selectedStep.value = editingStepIndex.value + 1
   }
   page.value = 1
+  activeQuickPresetId.value = ''
   resetOperationForm()
   workbench.savePipeline()
 }
@@ -2088,6 +2127,7 @@ function moveStep(index: number, offset: number): void {
   const selectedIndex = pipeline.value.steps.findIndex(({ id }) => id === selectedId)
   if (selectedIndex >= 0) selectedStep.value = selectedIndex + 1
   page.value = 1
+  activeQuickPresetId.value = ''
   workbench.savePipeline()
 }
 
@@ -2096,6 +2136,7 @@ function deleteStep(index: number): void {
   if (selectedStep.value > pipeline.value.steps.length) selectedStep.value = pipeline.value.steps.length
   else if (selectedStep.value === index + 1) selectedStep.value = Math.max(0, index)
   page.value = 1
+  activeQuickPresetId.value = ''
   resetOperationForm()
   workbench.savePipeline()
 }
@@ -2925,6 +2966,7 @@ async function processImportFile(file: File): Promise<void> {
       },
     })
 
+    activeQuickPresetId.value = ''
     pipeline.value.steps = response.steps
     workbench.setSaveOptions(response.recipe.saveOptions)
     resultEngine.value = response.recipe.saveOptions.engine
@@ -2956,6 +2998,130 @@ async function processImportFile(file: File): Promise<void> {
     void loadPreview()
   } catch (error) {
     importError.value = getErrorMessage(error, 'File cleansing template tidak dapat diimpor.')
+  } finally {
+    importingTemplate.value = false
+  }
+}
+
+async function applyQuickPreset(presetId: QuickPresetId): Promise<void> {
+  if (importingTemplate.value) return
+  const preset = quickPresets.find((item) => item.id === presetId)
+  if (!preset) return
+
+  importError.value = ''
+  importingTemplate.value = true
+  try {
+    if (sourceReady.value && sourceColumns.value.length === 0) {
+      await loadSourceColumns(pipeline.value.source.database, pipeline.value.source.table)
+    }
+
+    if (presetId === 'standardisasi_umum' && (!sourceReady.value || sourceColumns.value.length === 0)) {
+      activeQuickPresetId.value = presetId
+      pipeline.value.steps = []
+      selectedStep.value = 0
+      page.value = 1
+      displayFilter.value = null
+      rareResult.value = null
+      selectedRareKeys.value = []
+      resetOperationForm()
+      workbench.savePipeline()
+      importSummary.value = {
+        name: preset.recipeName,
+        valid: 0,
+        invalid: 0,
+        skipped: 0,
+        suggestedSourceNote: 'Pilih database dan tabel sumber terlebih dahulu agar kolom pertama dan kolom teks dapat dideteksi otomatis.',
+      }
+      return
+    }
+
+    const rawSteps = preset.buildSteps(sourceColumns.value)
+    let stepsToImport = rawSteps
+    let skippedCount = 0
+    let skippedDetails: string[] = []
+
+    if (sourceReady.value && sourceColumns.value.length > 0) {
+      const filtered = filterCompatiblePresetSteps(rawSteps, sourceColumns.value, operationName)
+      stepsToImport = filtered.compatibleSteps
+      skippedCount = filtered.skippedCount
+      skippedDetails = [...filtered.skippedDetails]
+    }
+
+    const payload: RecipeTemplatePayload = {
+      version: 1,
+      name: preset.recipeName,
+      createdAt: new Date().toISOString(),
+      steps: stepsToImport,
+      saveOptions: {
+        engine: resultEngine.value,
+        orderBy: [],
+        saveOriginal: saveOriginal.value,
+      },
+    }
+
+    const response = await $fetch<ImportTemplateResponse>('/api/workbench/import-recipe', {
+      method: 'POST',
+      body: {
+        rawJson: JSON.stringify(payload),
+        ...(sourceReady.value ? { source: pipeline.value.source } : {}),
+      },
+    })
+
+    let acceptedSteps = response.steps
+    if (sourceReady.value) {
+      const validSteps: WorkbenchStep[] = []
+      response.steps.forEach((step, idx) => {
+        const status = response.stepStatuses[idx]
+        if (status && !status.valid) {
+          skippedCount += 1
+          const reason = status.error ? status.error.replace(/^Langkah \d+:\s*/, '') : 'tidak kompatibel dengan skema tabel aktif.'
+          skippedDetails.push(`${operationName(step.op)}: ${reason}`)
+          return
+        }
+        validSteps.push(step)
+      })
+      acceptedSteps = validSteps
+    }
+
+    activeQuickPresetId.value = presetId
+    pipeline.value.steps = acceptedSteps
+    workbench.setSaveOptions(response.recipe.saveOptions)
+    resultEngine.value = response.recipe.saveOptions.engine
+    orderBy.value = [...response.recipe.saveOptions.orderBy]
+    saveOriginal.value = response.recipe.saveOptions.saveOriginal
+
+    selectedStep.value = sourceReady.value ? acceptedSteps.length : 0
+    page.value = 1
+    displayFilter.value = null
+    rareResult.value = null
+    selectedRareKeys.value = []
+    resetOperationForm()
+    workbench.savePipeline()
+
+    importSummary.value = {
+      name: response.recipe.name,
+      valid: sourceReady.value ? acceptedSteps.length : response.steps.length,
+      invalid: 0,
+      skipped: skippedCount,
+      skippedDetails,
+      suggestedSourceNote: sourceReady.value
+        ? ''
+        : 'Pilih database dan tabel sumber untuk memvalidasi dan menjalankan pratinjau preset.',
+    }
+
+    if (sourceReady.value) {
+      await refreshStepSchemas()
+      void loadPreview()
+    }
+  } catch (error) {
+    importSummary.value = {
+      name: preset.recipeName,
+      valid: 0,
+      invalid: 0,
+      skipped: 0,
+      skippedDetails: [getErrorMessage(error, 'Preset tidak dapat diterapkan ke tabel aktif.')],
+      suggestedSourceNote: '',
+    }
   } finally {
     importingTemplate.value = false
   }
@@ -3985,6 +4151,63 @@ onUnmounted(() => {
   background: #f5f8fa;
 }
 
+.wb-quick-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.wb-quick-presets-label {
+  color: var(--warna-redup);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.wb-quick-presets-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-preset-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--warna-garis);
+  border-radius: 999px;
+  color: #40566d;
+  background: #f8fbfe;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.wb-preset-chip:hover:not(:disabled) {
+  border-color: #b8cde0;
+  background: #edf5fc;
+  color: #24507a;
+}
+
+.wb-preset-chip-active {
+  border-color: var(--warna-utama);
+  background: #e3f0fb;
+  color: #24507a;
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgb(87 152 215 / 18%);
+}
+
+.wb-preset-chip:disabled {
+  color: #8998a8;
+  background: #f5f8fa;
+  cursor: not-allowed;
+}
+
 .wb-import-summary {
   display: grid;
   gap: 6px;
@@ -4003,6 +4226,18 @@ onUnmounted(() => {
 
 .wb-import-note {
   color: var(--warna-redup);
+}
+
+.wb-import-warnings {
+  display: grid;
+  gap: 3px;
+  max-height: 110px;
+  overflow: auto;
+  margin: 0;
+  padding-left: 16px;
+  color: #74591c;
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .wb-import-summary-actions {
