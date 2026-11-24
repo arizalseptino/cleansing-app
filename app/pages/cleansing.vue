@@ -1572,18 +1572,6 @@ const etlSummaryChips = computed(() => {
   if (typeof s.total_pppk === 'number') {
     chips.push({ label: 'Filter PPPK', value: numberFormat(s.total_pppk) })
   }
-  if (typeof s.master_instansi_count === 'number' || typeof s.master_jf_count === 'number') {
-    chips.push({
-      label: 'Referensi BKN',
-      value: `${numberFormat(Number(s.master_instansi_count || 0))} instansi · ${numberFormat(Number(s.master_jf_count || 0))} JF`,
-    })
-  }
-  if (typeof s.overrides_instansi_hit === 'number' || typeof s.overrides_jabatan_hit === 'number') {
-    chips.push({
-      label: 'Koreksi Manual',
-      value: `${numberFormat(Number(s.overrides_instansi_hit || 0))} instansi · ${numberFormat(Number(s.overrides_jabatan_hit || 0))} jabatan`,
-    })
-  }
   return chips
 })
 
